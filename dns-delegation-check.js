@@ -316,9 +316,11 @@ async function getZoneApex(domain, dnsResponseCache) {
     let explorationLogs = [];
     let lastDelegatedZone = '';
     let lastColocatedDelegation = null;
+    let colocatedParentLogId = null;
 
     const pushExplorationLog = (status, detail, server = currentNs, parent = parentNs || null, extra = {}) => {
-        explorationLogs.push({
+        const logEntry = {
+            id: `zone-apex-${explorationLogs.length}`,
             server,
             parent,
             status,
@@ -326,7 +328,9 @@ async function getZoneApex(domain, dnsResponseCache) {
             nsMatch: null,
             glueMatch: null,
             ...extra
-        });
+        };
+        explorationLogs.push(logEntry);
+        return logEntry;
     };
 
     const minimizedQnames = getMinimizedQnames(domain);
@@ -336,14 +340,16 @@ async function getZoneApex(domain, dnsResponseCache) {
     // ラベルを右から一つずつ増やし、親ゾーンから各ゾーンカットを取得する。
     while (qnameIndex < minimizedQnames.length && currentServerIPs?.length) {
         const qname = minimizedQnames[qnameIndex];
-        const currentParent = parentNs || null;
+        // 親子同居では currentNs と parentNs が同じになるため、自己参照のツリーを作らない。
+        const currentParent = parentNs && parentNs !== currentNs ? parentNs : null;
+        const currentParentLogId = parentNs === currentNs ? colocatedParentLogId : null;
         let delegation = null;
         const authoritativeResponses = [];
 
         for (const serverIp of currentServerIPs) {
             const res = await queryDirectlyUDP(qname, serverIp, dnsResponseCache, 'NS');
             if (res.error) {
-                pushExplorationLog('NETWORK_ERROR', `ゾーン頂点探索中のエラー (${serverIp}): ${res.error}${res.detail ? ' - ' + res.detail : ''}`, currentNs, currentParent);
+                pushExplorationLog('NETWORK_ERROR', `ゾーン頂点探索中のエラー (${serverIp}): ${res.error}${res.detail ? ' - ' + res.detail : ''}`, currentNs, currentParent, { parentLogId: currentParentLogId });
                 continue;
             }
 
@@ -358,7 +364,7 @@ async function getZoneApex(domain, dnsResponseCache) {
                     const detail = cnameRecord
                         ? `入力名は CNAME (${normalizeDnsName(cnameRecord.name)} -> ${normalizeDnsName(cnameRecord.data)}) です。CNAME の委任先は追跡せず、ゾーン頂点としての委任検査を終了します。 (${serverIp})`
                         : `回答に DNAME が含まれており、ゾーン頂点を確定できませんでした。 (${serverIp})`;
-                    pushExplorationLog(cnameRecord ? 'CNAME_FOUND' : 'DNAME_FOUND', detail, currentNs, currentParent);
+                    pushExplorationLog(cnameRecord ? 'CNAME_FOUND' : 'DNAME_FOUND', detail, currentNs, currentParent, { parentLogId: currentParentLogId });
                     cdName = true;
                     break;
                 }
@@ -372,11 +378,11 @@ async function getZoneApex(domain, dnsResponseCache) {
 
             if (isAuthoritative) {
                 authoritativeResponses.push({ serverIp, answers, authorities });
-                pushExplorationLog('AUTHORITATIVE_NO_DELEGATION', `${qname} に対して ${currentNs} は権威応答を返し、下位ゾーンへの委任はありません。 (${serverIp})`, currentNs, currentParent);
+                pushExplorationLog('AUTHORITATIVE_NO_DELEGATION', `${qname} に対して ${currentNs} は権威応答を返し、下位ゾーンへの委任はありません。 (${serverIp})`, currentNs, currentParent, { parentLogId: currentParentLogId });
                 continue;
             }
 
-            pushExplorationLog('UNEXPECTED_RESPONSE', `委任情報を特定できない応答です (${serverIp}, qname: ${qname}, rcode: ${res.rcode}, AA: ${isAuthoritative})。`, currentNs, currentParent);
+            pushExplorationLog('UNEXPECTED_RESPONSE', `委任情報を特定できない応答です (${serverIp}, qname: ${qname}, rcode: ${res.rcode}, AA: ${isAuthoritative})。`, currentNs, currentParent, { parentLogId: currentParentLogId });
         }
 
         if (zoneApex || cdName) break;
@@ -401,12 +407,13 @@ async function getZoneApex(domain, dnsResponseCache) {
                 parentNs = currentNs;
                 parentServerIPs = currentServerIPs;
                 lastColocatedDelegation = { zoneApex: qname, dsConfirmsDelegation };
-                pushExplorationLog(
+                const colocatedLog = pushExplorationLog(
                     'COLOCATED_DELEGATION',
                     `${qname} は親ゾーンと同じ権威サーバーに存在する子ゾーンです。親側の referral は取得できず、親が保持する委任 NS との比較は DNS 問い合わせだけでは実施できません。${dsConfirmsDelegation ? ' DS レコードでゾーンカットを確認しました。' : ' 子ゾーンの apex NS 応答を確認しました。'}`,
                     currentNs,
                     currentParent
                 );
+                colocatedParentLogId = colocatedLog.id;
                 qnameIndex++;
                 continue;
             }
@@ -423,6 +430,7 @@ async function getZoneApex(domain, dnsResponseCache) {
         const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPs.flat().filter(Boolean)])];
 
         pushExplorationLog('FOLLOW_DELEGATION', `${currentNs} が ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
+            parentLogId: currentParentLogId,
             nextServer: nextNsNames,
             glueIPs,
             rfc9471: summarizeRfc9471Referral(delegation.nsRecords, delegation.additionals)

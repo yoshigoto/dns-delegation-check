@@ -535,14 +535,16 @@ function renderLogTree(logData, target) {
     const rootNodes = [];
 
     logData.forEach((item, index) => {
-        const uniqueId = `${item.server}_${index}`;
+        const uniqueId = item.id || `${item.server}_${index}`;
         item.id = uniqueId;
         item.children = [];
         nodesMap[uniqueId] = item;
     });
 
     logData.forEach(item => {
-        if (item.parent === null) {
+        if (item.parentLogId && nodesMap[item.parentLogId]) {
+            nodesMap[item.parentLogId].children.push(item);
+        } else if (item.parent === null) {
             rootNodes.push(item);
         } else {
             let foundParent = null;
