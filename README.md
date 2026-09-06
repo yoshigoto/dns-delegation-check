@@ -66,7 +66,7 @@ https://www.on-link.jp/dnslamecheck/?domain=example.com
    npm start
    ```
 
-PM2 を使用する場合も、アプリ本体ではなく起動入口の `server.js` を指定します。
+PM2 を使用する場合も、アプリ本体ではなく起動用の `server.js` を指定します。
 
 ```bash
 pm2 start server.js --name dns-delegation-check
