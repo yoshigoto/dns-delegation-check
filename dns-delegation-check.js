@@ -457,7 +457,7 @@ async function getZoneApex(domain, dnsResponseCache) {
     if (!cdName && lastColocatedDelegation) {
         zoneApex = lastColocatedDelegation.zoneApex;
         parentDelegationUnavailable = true;
-        pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンと同じ権威サーバーで提供されているため、親側の委任情報は使用できません。`, currentNs, parentNs || null);
+        pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンと同じ権威サーバーで提供されているため、親側の委任情報は使用できません。`, currentNs, parentNs || null, { parentLogId: colocatedParentLogId });
     } else if (!cdName && lastDelegatedZone) {
         zoneApex = lastDelegatedZone;
         pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンの委任情報を使用して検査します。`, currentNs, parentNs || null);
