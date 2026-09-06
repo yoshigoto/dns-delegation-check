@@ -475,11 +475,11 @@ function buildSummary(logData) {
 
     const verdict = document.createElement('div');
     const verdictText = cnameFound
-        ? '⚠️  検査対象外: 入力名は CNAME (別名) でしたので、ゾーン名を指定してください'
+        ? '⚠️  検査対象外: 入力名は CNAME (別名) なので、ゾーン名を指定してください'
         : dnameFound
-            ? '⚠️  要確認: DNAME によりゾーン頂点を確定できません'
+            ? '⚠️  検査対象外: 入力名は DNAME なので、委任状態を確認できません'
         : colocatedDelegation
-            ? '⚠️  要確認: 親子ゾーンが同じ権威サーバーのため、親子 NS 情報を比較できません'
+            ? '⚠️  検査対象外: 親子ゾーンが同じ権威サーバーのため、親子 NS 情報を比較しません'
         : nameServerAddressFailures.length > 0
             ? '⚠️  要確認: 権威サーバーについて名前解決できないため、委任状態を確認できません'
         : failureEntries.length > 0 || maxDepthCount > 0 || missingAuthorityNsCount > 0
