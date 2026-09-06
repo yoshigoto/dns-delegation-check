@@ -66,6 +66,13 @@ https://www.on-link.jp/dnslamecheck/?domain=example.com
    npm start
    ```
 
+PM2 を使用する場合も、アプリ本体ではなく起動入口の `server.js` を指定します。
+
+```bash
+pm2 start server.js --name dns-delegation-check
+pm2 save
+```
+
 3. ブラウザーで次の URL を開きます。
 
    <http://localhost:3001/>
@@ -122,6 +129,7 @@ Content-Type: application/json
 
 - `index.html`: 入力画面、結果表示、ブラウザー側の API 呼び出し
 - `dns-delegation-check.js`: Express サーバー、DNS 問い合わせ、委任追跡、API
+- `server.js`: 本番実行時に Express サーバーを起動する入口
 - `package.json`: Node.js の依存パッケージと ES Modules 設定
 - `public/`: Express が静的配信するファイル置き場
 

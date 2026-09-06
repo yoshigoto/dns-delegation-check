@@ -5,7 +5,7 @@
   },
   "type": "module",
   "scripts": {
-    "start": "node dns-delegation-check.js",
+    "start": "node server.js",
     "test": "node --test \"test/**/*.test.js\""
   }
 }

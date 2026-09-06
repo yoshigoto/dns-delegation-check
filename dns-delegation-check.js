@@ -7,7 +7,6 @@ import promisesDns from 'dns/promises';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const currentFilePath = fileURLToPath(import.meta.url);
 const app = express();
 app.use(express.json());
 app.use(express.static('public'));
@@ -715,9 +714,10 @@ app.post('/api/trace', async (req, res) => {
 
 const PORT = 3001;
 
-if (process.argv[1] && path.resolve(process.argv[1]) === currentFilePath) {
+function startServer() {
     const server = app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
     server.timeout = 120000;
+    return server;
 }
 
 export {
@@ -730,5 +730,6 @@ export {
     normalizeDnsName,
     normalizeUserDomain,
     summarizeRfc9471Referral,
-    traceDomain
+    traceDomain,
+    startServer
 };
