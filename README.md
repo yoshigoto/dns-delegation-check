@@ -63,14 +63,24 @@ https://www.on-link.jp/dnslamecheck/?domain=example.com
 2. サーバーを起動します。
 
    ```bash
-   node dns-lame-check.js
+   npm start
    ```
 
 3. ブラウザーで次の URL を開きます。
 
    <http://localhost:3001/>
 
-サーバーの待ち受けポートは `dns-lame-check.js` の `PORT` 定数で `3001` に設定されています。`package.json` には起動スクリプトが定義されていないため、上記の Node.js コマンドで直接起動します。
+サーバーの待ち受けポートは `dns-delegation-check.js` の `PORT` 定数で `3001` に設定されています。
+
+## テスト
+
+ネットワークに依存しない入力検証、DNS 名の親子関係、in-domain glue、RFC 9471 の要約、CNAME/DNAME による探索終了、親子同居時のゾーン頂点探索ログ階層、委任追跡の成功・不一致・タイムアウト・通信エラー・IP 解決不能をテストできます。
+
+```bash
+npm test
+```
+
+テストは `test/dns-delegation-check.test.js` にあります。DNS サーバーへ実際に問い合わせる処理は、固定したモック応答に差し替えて評価します。実際の外部 DNS やネットワークの状態には依存しません。
 
 ## 使い方
 
@@ -111,7 +121,7 @@ Content-Type: application/json
 ## 構成
 
 - `index.html`: 入力画面、結果表示、ブラウザー側の API 呼び出し
-- `dns-lame-check.js`: Express サーバー、DNS 問い合わせ、委任追跡、API
+- `dns-delegation-check.js`: Express サーバー、DNS 問い合わせ、委任追跡、API
 - `package.json`: Node.js の依存パッケージと ES Modules 設定
 - `public/`: Express が静的配信するファイル置き場
 

@@ -7,6 +7,7 @@ import promisesDns from 'dns/promises';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const currentFilePath = fileURLToPath(import.meta.url);
 const app = express();
 app.use(express.json());
 app.use(express.static('public'));
@@ -306,9 +307,11 @@ function getMinimizedQnames(domain) {
     return labels.map((_, index) => labels.slice(index).join('.')).reverse();
 }
 
-async function getZoneApex(domain, dnsResponseCache) {
+async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
+    const resolveIPs = dependencies.resolveServerIPs || resolveServerIPs;
+    const queryUDP = dependencies.queryDirectlyUDP || queryDirectlyUDP;
     let currentNs = 'a.root-servers.net';
-    let currentServerIPs = await resolveServerIPs(currentNs);
+    let currentServerIPs = await resolveIPs(currentNs);
     let parentNs = '';
     let parentServerIPs = [];
     let zoneApex = '';
@@ -347,7 +350,7 @@ async function getZoneApex(domain, dnsResponseCache) {
         const authoritativeResponses = [];
 
         for (const serverIp of currentServerIPs) {
-            const res = await queryDirectlyUDP(qname, serverIp, dnsResponseCache, 'NS');
+            const res = await queryUDP(qname, serverIp, dnsResponseCache, 'NS');
             if (res.error) {
                 pushExplorationLog('NETWORK_ERROR', `ゾーン頂点探索中のエラー (${serverIp}): ${res.error}${res.detail ? ' - ' + res.detail : ''}`, currentNs, currentParent, { parentLogId: currentParentLogId });
                 continue;
@@ -393,7 +396,7 @@ async function getZoneApex(domain, dnsResponseCache) {
             let dsConfirmsDelegation = false;
 
             for (const { serverIp } of authoritativeResponses) {
-                const dsResponse = await queryDirectlyUDP(qname, serverIp, dnsResponseCache, 'DS');
+                const dsResponse = await queryUDP(qname, serverIp, dnsResponseCache, 'DS');
                 if (dsResponse.error) continue;
 
                 const dsAnswers = dsResponse.answers || [];
@@ -426,7 +429,7 @@ async function getZoneApex(domain, dnsResponseCache) {
         const glueIPs = delegation.additionals
             .filter(record => isInBailiwickGlue(record, nextNsNames, delegation.nextZone))
             .map(record => record.data);
-        const resolvedIPs = await Promise.all(nextNsNames.map(resolveServerIPs));
+        const resolvedIPs = await Promise.all(nextNsNames.map(resolveIPs));
         const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPs.flat().filter(Boolean)])];
 
         pushExplorationLog('FOLLOW_DELEGATION', `${currentNs} が ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
@@ -476,7 +479,9 @@ async function getZoneApex(domain, dnsResponseCache) {
     };
 }
 
-async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, currentDepth = 1, expectedNSList = [], parentGlueMap = {}) {
+async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, currentDepth = 1, expectedNSList = [], parentGlueMap = {}, dependencies = {}) {
+    const resolveIPs = dependencies.resolveServerIPs || resolveServerIPs;
+    const queryUDP = dependencies.queryDirectlyUDP || queryDirectlyUDP;
     let results = [];
     if (currentDepth > 10) {
         results.push({
@@ -500,7 +505,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             glueMatch: null
         };
 
-        const res = await queryDirectlyUDP(domain, serverIp, dnsResponseCache, 'NS');
+        const res = await queryUDP(domain, serverIp, dnsResponseCache, 'NS');
 
         if (res.error === 'TIMEOUT') {
             logEntry.status = 'LAME_DELEGATION_TIMEOUT';
@@ -570,7 +575,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             const currentNSName = Object.keys(parentGlueMap).find(name => parentGlueMap[name].includes(serverIp));
 
             if (currentNSName) {
-                const childIPs = await resolveServerIPs(currentNSName);
+                const childIPs = await resolveIPs(currentNSName);
                 const parentGlueIPs = parentGlueMap[currentNSName] || [];
 
                 if (childIPs) {
@@ -637,7 +642,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                     });
                 } else {
                     // 本来の意味での Glueが無かった場合に、親が持つ子情報から IPアドレスを取得してリストに登録
-                    const resolvedIPs = await resolveServerIPs(ns.data);
+                    const resolvedIPs = await resolveIPs(ns.data);
                     if (resolvedIPs) {
                         resolvedIPs.forEach(ip => {
                             nextServerIPs.push(ip);
@@ -649,7 +654,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             nextServerIPs = [...new Set(nextServerIPs)];
 
             if (nextServerIPs.length > 0) {
-                const childResults = await traceDomain(domain, nextServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap);
+                const childResults = await traceDomain(domain, nextServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap, dependencies);
                 results = results.concat(childResults);
             } else {
                 results.push({
@@ -709,5 +714,21 @@ app.post('/api/trace', async (req, res) => {
 });
 
 const PORT = 3001;
-const server = app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
-server.timeout = 120000; 
+
+if (process.argv[1] && path.resolve(process.argv[1]) === currentFilePath) {
+    const server = app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+    server.timeout = 120000;
+}
+
+export {
+    app,
+    getMinimizedQnames,
+    hasParentChildRelationship,
+    isInBailiwickGlue,
+    isIPv6,
+    getZoneApex,
+    normalizeDnsName,
+    normalizeUserDomain,
+    summarizeRfc9471Referral,
+    traceDomain
+};
