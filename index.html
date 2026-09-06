@@ -293,6 +293,8 @@
         .DELEGATED-bg { background-color: #17a2b8; }
         .SUCCESS-border { border-left-color: #28a745; }
         .SUCCESS-bg { background-color: #28a745; }
+        .COLOCATED-border { border-left-color: #f0ad4e; background-color: #fff8e6; }
+        .COLOCATED-bg { background-color: #f0ad4e; }
         .LAME-border { border-left-color: #dc3545; background-color: #fdf2f2; }
         .LAME-bg { background-color: #dc3545; }
         .ERROR-border { border-left-color: #6c757d; }
@@ -435,6 +437,7 @@ function buildSummary(logData) {
     const maxDepthCount = logData.filter(item => item.status === 'LAME_DELEGATION_MAX_DEPTH').length;
     const cnameFound = logData.some(item => item.status === 'CNAME_FOUND');
     const dnameFound = logData.some(item => item.status === 'DNAME_FOUND');
+    const colocatedDelegation = logData.some(item => item.status === 'COLOCATED_DELEGATION');
     const aliasIssue = cnameFound || dnameFound;
 
     const summaryItems = [
@@ -447,6 +450,11 @@ function buildSummary(logData) {
             label: '正常な委任',
             value: `${successCount} 件`,
             tone: successCount > 0 ? 'success' : 'info'
+        },
+        {
+            label: '親子 NS 比較',
+            value: colocatedDelegation ? '確認不能（同居ゾーン）' : '実施可能',
+            tone: colocatedDelegation ? 'warning' : 'success'
         },
         {
             label: '異常検出',
@@ -470,6 +478,8 @@ function buildSummary(logData) {
         ? '⚠️  検査対象外: 入力名は CNAME (別名) でしたので、ゾーン名を指定してください'
         : dnameFound
             ? '⚠️  要確認: DNAME によりゾーン頂点を確定できません'
+        : colocatedDelegation
+            ? '⚠️  要確認: 親子ゾーンが同じ権威サーバーのため、親子 NS 情報を比較できません'
         : nameServerAddressFailures.length > 0
             ? '⚠️  要確認: 権威サーバーについて名前解決できないため、委任状態を確認できません'
         : failureEntries.length > 0 || maxDepthCount > 0 || missingAuthorityNsCount > 0
@@ -480,6 +490,7 @@ function buildSummary(logData) {
 
     verdict.className = `summary-verdict ${
         aliasIssue ||
+        colocatedDelegation ||
         nameServerAddressFailures.length > 0 ||
         failureEntries.length > 0 ||
         maxDepthCount > 0 ||
@@ -557,6 +568,7 @@ function renderLogTree(logData, target) {
 
             let typeKey = 'DELEGATED';
             if (node.status === 'SUCCESS') typeKey = 'SUCCESS';
+            if (node.status === 'COLOCATED_DELEGATION') typeKey = 'COLOCATED';
             if (node.status && node.status.startsWith('LAME_DELEGATION')) typeKey = 'LAME';
             if (node.status === 'ERROR' || node.status === 'NETWORK_ERROR') typeKey = 'ERROR';
 

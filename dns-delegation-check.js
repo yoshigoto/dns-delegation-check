@@ -315,6 +315,7 @@ async function getZoneApex(domain, dnsResponseCache) {
     let cdName = false;
     let explorationLogs = [];
     let lastDelegatedZone = '';
+    let colocatedDelegation = null;
 
     const pushExplorationLog = (status, detail, server = currentNs, parent = parentNs || null, extra = {}) => {
         explorationLogs.push({
@@ -401,6 +402,7 @@ async function getZoneApex(domain, dnsResponseCache) {
                 parentNs = currentNs;
                 parentServerIPs = currentServerIPs;
                 parentDelegationUnavailable = true;
+                colocatedDelegation = { dsConfirmsDelegation };
                 pushExplorationLog(
                     'COLOCATED_DELEGATION',
                     `${qname} は親ゾーンと同じ権威サーバーに存在する子ゾーンです。親側の referral は取得できず、親が保持する委任 NS との比較は DNS 問い合わせだけでは実施できません。${dsConfirmsDelegation ? ' DS レコードでゾーンカットを確認しました。' : ' 子ゾーンの apex NS 応答を確認しました。'}`,
@@ -457,6 +459,7 @@ async function getZoneApex(domain, dnsResponseCache) {
         zoneApex: zoneApex,
         cdName: cdName,
         parentDelegationUnavailable: parentDelegationUnavailable,
+        colocatedDelegation: colocatedDelegation,
         explorationLogs: explorationLogs,
         errorLogs: explorationLogs
     };
@@ -670,6 +673,18 @@ app.post('/api/trace', async (req, res) => {
                 ? zoneApexInfo.parentServerIPs
                 : await resolveServerIPs('a.root-servers.net');
             traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {});
+        } else if (zoneApexInfo.zoneApex !== '' && zoneApexInfo.parentDelegationUnavailable) {
+            const dsConfirmation = zoneApexInfo.colocatedDelegation?.dsConfirmsDelegation
+                ? ' DS レコードによりゾーンカットの存在は確認しました。'
+                : '';
+            traceLog = [{
+                server: zoneApexInfo.currentNs,
+                parent: null,
+                status: 'COLOCATED_DELEGATION',
+                detail: `${zoneApexInfo.zoneApex} は親ゾーンと同じ権威サーバーで提供されています。親側 referral を取得できないため、親子の NS 情報は比較できません。${dsConfirmation}`,
+                nsMatch: null,
+                glueMatch: null
+            }];
         }
 
         res.json({
