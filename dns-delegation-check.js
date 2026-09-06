@@ -315,7 +315,7 @@ async function getZoneApex(domain, dnsResponseCache) {
     let cdName = false;
     let explorationLogs = [];
     let lastDelegatedZone = '';
-    let colocatedDelegation = null;
+    let lastColocatedDelegation = null;
 
     const pushExplorationLog = (status, detail, server = currentNs, parent = parentNs || null, extra = {}) => {
         explorationLogs.push({
@@ -398,18 +398,17 @@ async function getZoneApex(domain, dnsResponseCache) {
             }
 
             if (childNsResponse || dsConfirmsDelegation) {
-                zoneApex = qname;
                 parentNs = currentNs;
                 parentServerIPs = currentServerIPs;
-                parentDelegationUnavailable = true;
-                colocatedDelegation = { dsConfirmsDelegation };
+                lastColocatedDelegation = { zoneApex: qname, dsConfirmsDelegation };
                 pushExplorationLog(
                     'COLOCATED_DELEGATION',
                     `${qname} は親ゾーンと同じ権威サーバーに存在する子ゾーンです。親側の referral は取得できず、親が保持する委任 NS との比較は DNS 問い合わせだけでは実施できません。${dsConfirmsDelegation ? ' DS レコードでゾーンカットを確認しました。' : ' 子ゾーンの apex NS 応答を確認しました。'}`,
                     currentNs,
                     currentParent
                 );
-                break;
+                qnameIndex++;
+                continue;
             }
 
             qnameIndex++;
@@ -447,7 +446,11 @@ async function getZoneApex(domain, dnsResponseCache) {
         qnameIndex++;
     }
 
-    if (!cdName && lastDelegatedZone) {
+    if (!cdName && lastColocatedDelegation) {
+        zoneApex = lastColocatedDelegation.zoneApex;
+        parentDelegationUnavailable = true;
+        pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンと同じ権威サーバーで提供されているため、親側の委任情報は使用できません。`, currentNs, parentNs || null);
+    } else if (!cdName && lastDelegatedZone) {
         zoneApex = lastDelegatedZone;
         pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンの委任情報を使用して検査します。`, currentNs, parentNs || null);
     }
@@ -459,7 +462,7 @@ async function getZoneApex(domain, dnsResponseCache) {
         zoneApex: zoneApex,
         cdName: cdName,
         parentDelegationUnavailable: parentDelegationUnavailable,
-        colocatedDelegation: colocatedDelegation,
+        colocatedDelegation: lastColocatedDelegation,
         explorationLogs: explorationLogs,
         errorLogs: explorationLogs
     };
