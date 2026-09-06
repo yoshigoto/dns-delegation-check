@@ -451,11 +451,11 @@ function buildSummary(logData) {
             value: `${successCount} 件`,
             tone: successCount > 0 ? 'success' : 'info'
         },
-        {
+        /*{
             label: '親子 NS 比較',
             value: colocatedDelegation ? '確認不能（同居ゾーン）' : '実施可能',
             tone: colocatedDelegation ? 'warning' : 'success'
-        },
+        },*/
         {
             label: '異常検出',
             value: failureEntries.length > 0 ? `${failureEntries.length} 件の委任異常` : 'なし',
