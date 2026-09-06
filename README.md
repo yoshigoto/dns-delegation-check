@@ -129,7 +129,7 @@ Content-Type: application/json
 
 - `index.html`: 入力画面、結果表示、ブラウザー側の API 呼び出し
 - `dns-delegation-check.js`: Express サーバー、DNS 問い合わせ、委任追跡、API
-- `server.js`: 本番実行時に Express サーバーを起動する入口
+- `server.js`: 本番実行時に Express サーバーを起動するためのファイル
 - `package.json`: Node.js の依存パッケージと ES Modules 設定
 - `public/`: Express が静的配信するファイル置き場
 
