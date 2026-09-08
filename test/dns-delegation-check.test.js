@@ -174,6 +174,7 @@ test('入力名への最終委任先にある CNAME を検出する', async () =
     assert.equal(result.cdName, true);
     assert.equal(result.zoneApex, '');
     assert.equal(result.explorationLogs.at(-1).status, 'CNAME_FOUND');
+    assert.equal(result.explorationLogs.at(-1).parentLogId, 'zone-apex-3');
 });
 
 test('親子同居のゾーン頂点探索ログを親子階層で保持する', async () => {

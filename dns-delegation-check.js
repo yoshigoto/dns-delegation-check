@@ -429,7 +429,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         const resolvedIPs = await Promise.all(nextNsNames.map(resolveIPs));
         const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPs.flat().filter(Boolean)])];
 
-        pushExplorationLog('FOLLOW_DELEGATION', `${currentNs} が ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
+        const delegationLog = pushExplorationLog('FOLLOW_DELEGATION', `${currentNs} が ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
             parentLogId: currentParentLogId,
             nextServer: nextNsNames,
             glueIPs,
@@ -465,7 +465,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
                     const detail = childCnameRecord
                         ? `入力名は CNAME (${normalizeDnsName(childCnameRecord.name)} -> ${normalizeDnsName(childCnameRecord.data)}) です。CNAME の委任先は追跡せず、ゾーン頂点としての委任検査を終了します。 (${nextServerIp})`
                         : `回答に DNAME が含まれており、ゾーン頂点を確定できませんでした。 (${nextServerIp})`;
-                    pushExplorationLog(childCnameRecord ? 'CNAME_FOUND' : 'DNAME_FOUND', detail, currentNs, currentNs, { parentLogId: null });
+                    pushExplorationLog(childCnameRecord ? 'CNAME_FOUND' : 'DNAME_FOUND', detail, currentNs, currentNs, { parentLogId: delegationLog.id });
                     cdName = true;
                     break;
                 }
