@@ -452,6 +452,25 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         currentServerIPs = nextServerIPs;
         lastDelegatedZone = delegation.nextZone;
         qnameIndex++;
+
+        // 最終入力名への委任がある場合は、委任先で CNAME/DNAME か確認する。
+        if (qnameIndex >= minimizedQnames.length) {
+            for (const nextServerIp of currentServerIPs) {
+                const childResponse = await queryUDP(qname, nextServerIp, dnsResponseCache, 'NS');
+                if (childResponse.error) continue;
+
+                const childCnameRecord = (childResponse.answers || []).find(record => record.type === 'CNAME');
+                const childDnameRecord = (childResponse.answers || []).find(record => record.type === 'DNAME');
+                if (childCnameRecord || childDnameRecord) {
+                    const detail = childCnameRecord
+                        ? `入力名は CNAME (${normalizeDnsName(childCnameRecord.name)} -> ${normalizeDnsName(childCnameRecord.data)}) です。CNAME の委任先は追跡せず、ゾーン頂点としての委任検査を終了します。 (${nextServerIp})`
+                        : `回答に DNAME が含まれており、ゾーン頂点を確定できませんでした。 (${nextServerIp})`;
+                    pushExplorationLog(childCnameRecord ? 'CNAME_FOUND' : 'DNAME_FOUND', detail, currentNs, currentNs, { parentLogId: null });
+                    cdName = true;
+                    break;
+                }
+            }
+        }
     }
 
     if (!cdName && lastColocatedDelegation) {

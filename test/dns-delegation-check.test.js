@@ -154,6 +154,28 @@ test('非権威応答の CNAME でもゾーン頂点探索を終了する', asyn
     assert.equal(result.explorationLogs.at(-1).status, 'CNAME_FOUND');
 });
 
+test('入力名への最終委任先にある CNAME を検出する', async () => {
+    const dependencies = createZoneApexTestDependencies([
+        { qname: 'jp', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('jp', 'ns.jp', '192.0.2.2') },
+        { qname: 'co.jp', serverIp: '192.0.2.2', qType: 'NS', value: referralResponse('co.jp', 'ns.co.jp', '192.0.2.3') },
+        { qname: 'tv-asahi.co.jp', serverIp: '192.0.2.3', qType: 'NS', value: referralResponse('tv-asahi.co.jp', 'ns.d-53.tv-asahi.co.jp', '192.0.2.4') },
+        { qname: 'news.tv-asahi.co.jp', serverIp: '192.0.2.4', qType: 'NS', value: referralResponse('news.tv-asahi.co.jp', 'ns.aws.news.tv-asahi.co.jp', '192.0.2.5') },
+        {
+            qname: 'news.tv-asahi.co.jp', serverIp: '192.0.2.5', qType: 'NS', value: {
+                flags: 1024,
+                answers: [{ type: 'CNAME', name: 'news.tv-asahi.co.jp', data: 'n.sni.global.fastly.net' }],
+                authorities: []
+            }
+        }
+    ]);
+
+    const result = await getZoneApex('news.tv-asahi.co.jp', new Map(), dependencies);
+
+    assert.equal(result.cdName, true);
+    assert.equal(result.zoneApex, '');
+    assert.equal(result.explorationLogs.at(-1).status, 'CNAME_FOUND');
+});
+
 test('親子同居のゾーン頂点探索ログを親子階層で保持する', async () => {
     const dependencies = createZoneApexTestDependencies([
         { qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('com', 'ns.com', '192.0.2.2') },
