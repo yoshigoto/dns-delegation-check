@@ -359,17 +359,15 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             const answers = res.answers || [];
             const authorities = res.authorities || [];
 
-            if (isAuthoritative) {
-                const cnameRecord = answers.find(r => r.type === 'CNAME');
-                const dnameRecord = answers.find(r => r.type === 'DNAME');
-                if (cnameRecord || dnameRecord) {
-                    const detail = cnameRecord
-                        ? `入力名は CNAME (${normalizeDnsName(cnameRecord.name)} -> ${normalizeDnsName(cnameRecord.data)}) です。CNAME の委任先は追跡せず、ゾーン頂点としての委任検査を終了します。 (${serverIp})`
-                        : `回答に DNAME が含まれており、ゾーン頂点を確定できませんでした。 (${serverIp})`;
-                    pushExplorationLog(cnameRecord ? 'CNAME_FOUND' : 'DNAME_FOUND', detail, currentNs, currentParent, { parentLogId: currentParentLogId });
-                    cdName = true;
-                    break;
-                }
+            const cnameRecord = answers.find(r => r.type === 'CNAME');
+            const dnameRecord = answers.find(r => r.type === 'DNAME');
+            if (cnameRecord || dnameRecord) {
+                const detail = cnameRecord
+                    ? `入力名は CNAME (${normalizeDnsName(cnameRecord.name)} -> ${normalizeDnsName(cnameRecord.data)}) です。CNAME の委任先は追跡せず、ゾーン頂点としての委任検査を終了します。 (${serverIp})`
+                    : `回答に DNAME が含まれており、ゾーン頂点を確定できませんでした。 (${serverIp})`;
+                pushExplorationLog(cnameRecord ? 'CNAME_FOUND' : 'DNAME_FOUND', detail, currentNs, currentParent, { parentLogId: currentParentLogId });
+                cdName = true;
+                break;
             }
 
             const validNsRecords = authorities.filter(r => r.type === 'NS' && normalizeDnsName(r.name) === qname);
