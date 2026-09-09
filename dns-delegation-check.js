@@ -429,7 +429,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         const resolvedIPs = await Promise.all(nextNsNames.map(resolveIPs));
         const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPs.flat().filter(Boolean)])];
 
-        const delegationLog = pushExplorationLog('FOLLOW_DELEGATION', `${currentNs} が ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
+        const delegationLog = pushExplorationLog('FOLLOW_DELEGATION', `${currentNs} に対して ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
             parentLogId: currentParentLogId,
             nextServer: nextNsNames,
             glueIPs,
