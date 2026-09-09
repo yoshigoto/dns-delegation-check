@@ -52,6 +52,34 @@ https://www.on-link.jp/dnslamecheck/?domain=example.com
 - Node.js 18 以降を推奨
 - DNS サーバーへ UDP/TCP の 53 番ポートで接続できるネットワーク
 
+## WSL2 の Ubuntu で開発する場合
+
+リポジトリは Windows 側ではなく、WSL2 の Ubuntu ファイルシステム上（例: `~/src/dns-delegation-check`）に配置してください。VS Code は Ubuntu のターミナルから次のように起動すると、Node.js、依存パッケージ、テストがすべて WSL 側で実行されます。
+
+```bash
+cd ~/src/dns-delegation-check
+code .
+```
+
+Ubuntu に Node.js 18 以降と npm を用意したうえで、依存パッケージをインストールします。Ubuntu のパッケージを使う場合は、次のコマンドでインストールできます。
+
+```bash
+sudo apt update
+sudo apt install -y nodejs npm
+which node
+which npm
+node --version
+npm --version
+npm ci
+npm test
+```
+
+Node.js のバージョン管理が必要な場合は、`apt` の代わりに `nvm install 18 && nvm use 18` を使っても構いません。
+
+`which node` と `which npm` が `/usr/bin`、`$HOME/.nvm` などを示し、`/mnt/c/Program Files/nodejs` を示さないことを確認してください。既存の `node_modules` が Windows 側の npm で作られている場合は、WSL 側で `rm -rf node_modules && npm ci` を実行して作り直します。
+
+VS Code の統合ターミナルは、このワークスペースでは Linux の Bash を既定にしています。WSL 拡張機能を使用している場合は、ステータスバーで Ubuntu に接続した状態で開発してください。
+
 ## ローカルでの起動
 
 1. 依存パッケージをインストールします。
