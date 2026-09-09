@@ -121,7 +121,7 @@ test('ゾーン頂点探索は CNAME と DNAME で終了ログを記録する', 
             ]);
 
             const result = await getZoneApex('alias.example.com', new Map(), dependencies);
-            assert.equal(result.cdName, true);
+            assert.equal(result.hasCnameOrDname, true);
             assert.equal(result.zoneApex, '');
             assert.deepEqual(result.explorationLogs.map(log => log.status), [
                 'FOLLOW_DELEGATION',
@@ -149,7 +149,7 @@ test('非権威応答の CNAME でもゾーン頂点探索を終了する', asyn
 
     const result = await getZoneApex('news.tv-asahi.co.jp', new Map(), dependencies);
 
-    assert.equal(result.cdName, true);
+    assert.equal(result.hasCnameOrDname, true);
     assert.equal(result.zoneApex, '');
     assert.equal(result.explorationLogs.at(-1).status, 'CNAME_FOUND');
 });
@@ -171,7 +171,7 @@ test('入力名への最終委任先にある CNAME を検出する', async () =
 
     const result = await getZoneApex('news.tv-asahi.co.jp', new Map(), dependencies);
 
-    assert.equal(result.cdName, true);
+    assert.equal(result.hasCnameOrDname, true);
     assert.equal(result.zoneApex, '');
     assert.equal(result.explorationLogs.at(-1).status, 'CNAME_FOUND');
     assert.equal(result.explorationLogs.at(-1).parentLogId, 'zone-apex-3');
