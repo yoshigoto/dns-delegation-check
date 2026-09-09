@@ -74,7 +74,14 @@ npm ci
 npm test
 ```
 
-Node.js のバージョン管理が必要な場合は、`apt` の代わりに `nvm install 18 && nvm use 18` を使っても構いません。
+Node.js のバージョン管理には nvm を使えます。リポジトリの `.nvmrc` に合わせて、次のコマンドを実行してください。
+
+```bash
+nvm install
+nvm use
+```
+
+`.nvmrc` には Node.js 22 を指定しています。Node.js 18 以降が必要なプロジェクト要件を満たしつつ、Ubuntu 上で開発バージョンを揃えられます。
 
 `which node` と `which npm` が `/usr/bin`、`$HOME/.nvm` などを示し、`/mnt/c/Program Files/nodejs` を示さないことを確認してください。既存の `node_modules` が Windows 側の npm で作られている場合は、WSL 側で `rm -rf node_modules && npm ci` を実行して作り直します。
 
