@@ -8,6 +8,12 @@
 		"terminal.integrated.defaultProfile.linux": "bash",
 		"terminal.integrated.cwd": "${workspaceFolder}",
 		"npm.packageManager": "npm",
-		"files.eol": "\n"
+		"files.eol": "\n",
+		"chat.tools.terminal.autoApprove": {
+			"/^python3 - <<'PY'\nimport json\np='/home/goto/\\.vscode-server/data/User/workspaceStorage/b64b810f34e63ffde0c16459b24bbed5/GitHub\\.copilot-chat/chat-session-resources/29c0f098-7f7e-4084-892c-e3d4a815e1f9/call_xTL07tU3lsYQncNf6ww2pwQD__vscode-1789029148614/content\\.txt'\ns=open\\(p\\)\\.read\\(\\); body=s\\.split\\('\\\\n__HTTP_STATUS__:',1\\)\\[0\\]; d=json\\.loads\\(body\\)\nprint\\('keys', list\\(d\\)\\)\nprint\\(json\\.dumps\\(d, indent=2\\)\\[:12000\\]\\)\nprint\\(s\\[s\\.find\\('__HTTP_STATUS__'\\):\\]\\)\nPY$/": {
+				"approve": true,
+				"matchCommandLine": true
+			}
+		}
 	}
 }

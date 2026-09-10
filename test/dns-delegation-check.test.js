@@ -195,9 +195,15 @@ test('委任のない権威応答でゾーン頂点探索を終了する', async
 
     const result = await getZoneApex('host.example.com', new Map(), dependencies);
 
-    assert.equal(result.zoneApex, '');
+    assert.equal(result.zoneApex, 'example.com');
     assert.equal(result.hasNoDelegationForQname, true);
-    assert.equal(result.explorationLogs.at(-1).status, 'NO_DELEGATION_FOR_QNAME');
+    assert.deepEqual(result.explorationLogs.map(log => log.status), [
+        'FOLLOW_DELEGATION',
+        'FOLLOW_DELEGATION',
+        'AUTHORITATIVE_NO_DELEGATION',
+        'NO_DELEGATION_FOR_QNAME',
+        'ZONE_APEX_FOUND'
+    ]);
 });
 
 test('入力名への最終委任先にある CNAME を検出する', async () => {
