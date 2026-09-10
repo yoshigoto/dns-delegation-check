@@ -437,8 +437,9 @@ function buildSummary(logData) {
     const maxDepthCount = logData.filter(item => item.status === 'LAME_DELEGATION_MAX_DEPTH').length;
     const cnameFound = logData.some(item => item.status === 'CNAME_FOUND');
     const dnameFound = logData.some(item => item.status === 'DNAME_FOUND');
+    const addressRecordFound = logData.some(item => item.status === 'ADDRESS_RECORD_FOUND');
     const colocatedDelegation = logData.some(item => item.status === 'COLOCATED_DELEGATION');
-    const aliasIssue = cnameFound || dnameFound;
+    const aliasIssue = cnameFound || dnameFound || addressRecordFound;
 
     const summaryItems = [
         {
@@ -478,6 +479,8 @@ function buildSummary(logData) {
         ? '⚠️  検査対象外: 入力名は CNAME (別名) なので、ゾーン名を指定してください'
         : dnameFound
             ? '⚠️  検査対象外: 入力名は DNAME なので、委任状態を確認できません'
+        : addressRecordFound
+            ? '⚠️  検査対象外: 入力名は A/AAAA レコードを持つホスト名なので、ゾーン名を指定してください'
         : colocatedDelegation
             ? '⚠️  検査対象外: 親子ゾーンが同じ権威サーバーのため、親子 NS 情報を比較しません'
         : nameServerAddressFailures.length > 0
@@ -572,7 +575,7 @@ function renderLogTree(logData, target) {
             if (node.status === 'SUCCESS') typeKey = 'SUCCESS';
             if (node.status === 'COLOCATED_DELEGATION') typeKey = 'COLOCATED';
             if (node.status && node.status.startsWith('LAME_DELEGATION')) typeKey = 'LAME';
-            if (node.status === 'ERROR' || node.status === 'NETWORK_ERROR') typeKey = 'ERROR';
+            if (node.status === 'ERROR' || node.status === 'NETWORK_ERROR' || node.status === 'ADDRESS_RECORD_FOUND') typeKey = 'ERROR';
 
             const itemBlock = document.createElement('div');
             itemBlock.className = 'server-item-block';
