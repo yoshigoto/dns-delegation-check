@@ -294,10 +294,22 @@ function queryDirectlyUDP(domain, serverIp, dnsResponseCache, qType = 'NS', useE
     });
 }
 
+function resolveDnsRecord(query) {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve([]), 5000);
+        query()
+            .then(records => resolve(records))
+            .catch(() => resolve([]))
+            .finally(() => clearTimeout(timer));
+    });
+}
+
 async function resolveServerIPs(nsName) {
-    const ips = [];
-    try { const v4 = await promisesDns.resolve4(nsName); ips.push(...v4); } catch (e) {}
-    try { const v6 = await promisesDns.resolve6(nsName); ips.push(...v6); } catch (e) {}
+    const [v4, v6] = await Promise.all([
+        resolveDnsRecord(() => promisesDns.resolve4(nsName)),
+        resolveDnsRecord(() => promisesDns.resolve6(nsName))
+    ]);
+    const ips = [...v4, ...v6];
     return ips.length > 0 ? ips : null;
 }
 
@@ -316,6 +328,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     let zoneApex = '';
     let hasCnameOrDname = false;
     let hasAddressRecordWithoutDelegation = false;
+    let hasNoDelegationForQname = false;
     let explorationLogs = [];
     let lastDelegatedZone = '';
     let lastColocatedDelegation = null;
@@ -348,9 +361,12 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         const currentParentLogId = parentNs === currentNs ? colocatedParentLogId : null;
         let delegation = null;
         const authoritativeResponses = [];
+        const serverResponses = await Promise.all(currentServerIPs.map(async (serverIp) => ({
+            serverIp,
+            res: await queryUDP(qname, serverIp, dnsResponseCache, 'NS')
+        })));
 
-        for (const serverIp of currentServerIPs) {
-            const res = await queryUDP(qname, serverIp, dnsResponseCache, 'NS');
+        for (const { serverIp, res } of serverResponses) {
             if (res.error) {
                 pushExplorationLog('NETWORK_ERROR', `ゾーン頂点探索中のエラー (${serverIp}): ${res.error}${res.detail ? ' - ' + res.detail : ''}`, currentNs, currentParent, { parentLogId: currentParentLogId });
                 continue;
@@ -401,7 +417,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             pushExplorationLog('UNEXPECTED_RESPONSE', `委任情報を特定できない応答です (${serverIp}, qname: ${qname}, rcode: ${res.rcode}, AA: ${isAuthoritative})。`, currentNs, currentParent, { parentLogId: currentParentLogId });
         }
 
-        if (zoneApex || hasCnameOrDname || hasAddressRecordWithoutDelegation) break;
+        if (zoneApex || hasCnameOrDname || hasAddressRecordWithoutDelegation || hasNoDelegationForQname) break;
         if (!delegation) {
             const childNsResponse = authoritativeResponses.find(({ answers }) =>
                 answers.some(record => record.type === 'NS' && normalizeDnsName(record.name) === qname)
@@ -434,6 +450,18 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
                 continue;
             }
 
+            if (authoritativeResponses.length > 0 && !lastColocatedDelegation) {
+                pushExplorationLog(
+                    'NO_DELEGATION_FOR_QNAME',
+                    `${qname} は権威サーバーから下位ゾーンへの委任 NS レコードを取得できませんでした。入力名はゾーン頂点ではないため、委任状態を確認できません。`,
+                    currentNs,
+                    currentParent,
+                    { parentLogId: currentParentLogId }
+                );
+                hasNoDelegationForQname = true;
+                break;
+            }
+
             qnameIndex++;
             continue;
         }
@@ -442,7 +470,9 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         const glueIPs = delegation.additionals
             .filter(record => isInBailiwickGlue(record, nextNsNames, delegation.nextZone))
             .map(record => record.data);
-        const resolvedIPs = await Promise.all(nextNsNames.map(resolveIPs));
+        const resolvedIPs = glueIPs.length > 0
+            ? []
+            : await Promise.all(nextNsNames.map(resolveIPs));
         const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPs.flat().filter(Boolean)])];
 
         const delegationLog = pushExplorationLog('FOLLOW_DELEGATION', `${qname} に対して ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
@@ -489,11 +519,11 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         }
     }
 
-    if (!hasCnameOrDname && !hasAddressRecordWithoutDelegation && lastColocatedDelegation) {
+    if (!hasCnameOrDname && !hasAddressRecordWithoutDelegation && !hasNoDelegationForQname && lastColocatedDelegation) {
         zoneApex = lastColocatedDelegation.zoneApex;
         parentDelegationUnavailable = true;
         pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンと同じ権威サーバーで提供されているため、親側の委任情報は使用できません。`, currentNs, parentNs || null, { parentLogId: colocatedParentLogId });
-    } else if (!hasCnameOrDname && !hasAddressRecordWithoutDelegation && lastDelegatedZone) {
+    } else if (!hasCnameOrDname && !hasAddressRecordWithoutDelegation && !hasNoDelegationForQname && lastDelegatedZone) {
         zoneApex = lastDelegatedZone;
         pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンの委任情報を使用して検査します。`, currentNs, parentNs || null);
     }
@@ -505,6 +535,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         zoneApex: zoneApex,
         hasCnameOrDname,
         hasAddressRecordWithoutDelegation,
+        hasNoDelegationForQname,
         parentDelegationUnavailable: parentDelegationUnavailable,
         colocatedDelegation: lastColocatedDelegation,
         explorationLogs: explorationLogs,
@@ -713,16 +744,34 @@ app.post('/api/trace', async (req, res) => {
     const dnsResponseCache = new Map();
 
     try {
-        const zoneApexInfo = await getZoneApex(domain, dnsResponseCache);
+        let zoneApexTimer;
+        const zoneApexInfo = await Promise.race([
+            getZoneApex(domain, dnsResponseCache),
+            new Promise(resolve => {
+                zoneApexTimer = setTimeout(() => resolve({
+                    timedOut: true,
+                    explorationLogs: [{
+                        id: 'zone-apex-timeout',
+                        server: '',
+                        parent: null,
+                        status: 'ZONE_APEX_LOOKUP_TIMEOUT',
+                        detail: 'ゾーン頂点の探索が 30 秒以内に完了しませんでした。DNS サーバーの応答状況を確認してください。',
+                        nsMatch: null,
+                        glueMatch: null
+                    }]
+                }), 30000);
+            })
+        ]);
+        clearTimeout(zoneApexTimer);
         const explorationLog = zoneApexInfo.explorationLogs || zoneApexInfo.errorLogs || [];
 
         let traceLog = [];
-        if (zoneApexInfo.zoneApex !== '' && !zoneApexInfo.parentDelegationUnavailable) {
+        if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && !zoneApexInfo.parentDelegationUnavailable) {
             const serverList = zoneApexInfo.parentServerIPs.length > 0
                 ? zoneApexInfo.parentServerIPs
                 : await resolveServerIPs('a.root-servers.net');
             traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {});
-        } else if (zoneApexInfo.zoneApex !== '' && zoneApexInfo.parentDelegationUnavailable) {
+        } else if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && zoneApexInfo.parentDelegationUnavailable) {
             const dsConfirmation = zoneApexInfo.colocatedDelegation?.dsConfirmsDelegation
                 ? ' DS レコードによりゾーンカットの存在は確認しました。'
                 : '';

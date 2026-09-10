@@ -174,6 +174,27 @@ test('A レコード応答で委任 NS がなければ委任検査を終了す�
     assert.equal(result.explorationLogs.at(-1).status, 'ADDRESS_RECORD_FOUND');
 });
 
+test('委任のない権威応答でゾーン頂点探索を終了する', async () => {
+    const dependencies = createZoneApexTestDependencies([
+        { qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('com', 'ns.com', '192.0.2.2') },
+        { qname: 'example.com', serverIp: '192.0.2.2', qType: 'NS', value: referralResponse('example.com', 'ns.example.com', '192.0.2.3') },
+        {
+            qname: 'host.example.com', serverIp: '192.0.2.3', qType: 'NS', value: {
+                flags: 1024,
+                answers: [],
+                authorities: []
+            }
+        },
+        { qname: 'host.example.com', serverIp: '192.0.2.3', qType: 'DS', value: { flags: 1024, answers: [], authorities: [] } }
+    ]);
+
+    const result = await getZoneApex('host.example.com', new Map(), dependencies);
+
+    assert.equal(result.zoneApex, '');
+    assert.equal(result.hasNoDelegationForQname, true);
+    assert.equal(result.explorationLogs.at(-1).status, 'NO_DELEGATION_FOR_QNAME');
+});
+
 test('入力名への最終委任先にある CNAME を検出する', async () => {
     const dependencies = createZoneApexTestDependencies([
         { qname: 'jp', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('jp', 'ns.jp', '192.0.2.2') },
