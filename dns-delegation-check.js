@@ -551,7 +551,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
 
         if (isAuthoritative && answers.length === 0) {
             logEntry.status = 'LAME_DELEGATION_NO_ZONE';
-            logEntry.detail = `AUTHORITYとして指定されていますが、ゾーンを保持していません。${cacheNote}`;
+            logEntry.detail = `AUTHORITYとして指定されていますが、ゾーンを保持していません (NSレコードが存在しません)。${cacheNote}`;
             results.push(logEntry);
             continue;
         }
