@@ -206,6 +206,66 @@ test('委任のない権威応答でゾーン頂点探索を終了する', async
     ]);
 });
 
+test('中間ラベルに委任がない場合でも下位ラベルの委任を探索してゾーン頂点を確定する', async () => {
+    const dependencies = createZoneApexTestDependencies([
+        { qname: 'jp', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('jp', 'ns.jp', '192.0.2.2') },
+        {
+            qname: 'co.jp', serverIp: '192.0.2.2', qType: 'NS', value: {
+                flags: 1024,
+                answers: [],
+                authorities: []
+            }
+        },
+        { qname: 'co.jp', serverIp: '192.0.2.2', qType: 'DS', value: { flags: 1024, answers: [], authorities: [] } },
+        { qname: 'example.co.jp', serverIp: '192.0.2.2', qType: 'NS', value: referralResponse('example.co.jp', 'ns.example.co.jp', '192.0.2.3') },
+        {
+            qname: 'example.co.jp', serverIp: '192.0.2.3', qType: 'NS', value: {
+                flags: 1024,
+                answers: [{ type: 'NS', name: 'example.co.jp', data: 'ns.example.co.jp' }],
+                authorities: []
+            }
+        }
+    ]);
+
+    const result = await getZoneApex('example.co.jp', new Map(), dependencies);
+
+    assert.equal(result.zoneApex, 'example.co.jp');
+    assert.equal(result.hasNoDelegationForQname, false);
+    assert.deepEqual(result.explorationLogs.map(log => log.status), [
+        'FOLLOW_DELEGATION',
+        'AUTHORITATIVE_NO_DELEGATION',
+        'FOLLOW_DELEGATION',
+        'ZONE_APEX_FOUND'
+    ]);
+});
+
+test('ホスト名入力（例: www.on-link.jp）でホストへの委任がない場合でも委任されたゾーンを頂点として確定する', async () => {
+    const dependencies = createZoneApexTestDependencies([
+        { qname: 'jp', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('jp', 'ns.jp', '192.0.2.2') },
+        { qname: 'on-link.jp', serverIp: '192.0.2.2', qType: 'NS', value: referralResponse('on-link.jp', 'ns.on-link.jp', '192.0.2.3') },
+        {
+            qname: 'www.on-link.jp', serverIp: '192.0.2.3', qType: 'NS', value: {
+                flags: 1024,
+                answers: [],
+                authorities: []
+            }
+        },
+        { qname: 'www.on-link.jp', serverIp: '192.0.2.3', qType: 'DS', value: { flags: 1024, answers: [], authorities: [] } }
+    ]);
+
+    const result = await getZoneApex('www.on-link.jp', new Map(), dependencies);
+
+    assert.equal(result.zoneApex, 'on-link.jp');
+    assert.equal(result.hasNoDelegationForQname, true);
+    assert.deepEqual(result.explorationLogs.map(log => log.status), [
+        'FOLLOW_DELEGATION',
+        'FOLLOW_DELEGATION',
+        'AUTHORITATIVE_NO_DELEGATION',
+        'NO_DELEGATION_FOR_QNAME',
+        'ZONE_APEX_FOUND'
+    ]);
+});
+
 test('入力名への最終委任先にある CNAME を検出する', async () => {
     const dependencies = createZoneApexTestDependencies([
         { qname: 'jp', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('jp', 'ns.jp', '192.0.2.2') },

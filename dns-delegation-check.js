@@ -451,15 +451,18 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             }
 
             if (authoritativeResponses.length > 0 && !lastColocatedDelegation) {
-                pushExplorationLog(
-                    'NO_DELEGATION_FOR_QNAME',
-                    `${qname} は権威サーバーから下位ゾーンへの委任 NS レコードを取得できませんでした。入力名はゾーン頂点ではないため、委任状態を確認できません。`,
-                    currentNs,
-                    currentParent,
-                    { parentLogId: currentParentLogId }
-                );
-                hasNoDelegationForQname = true;
-                break;
+                const isLastQname = qnameIndex === minimizedQnames.length - 1;
+                if (isLastQname) {
+                    pushExplorationLog(
+                        'NO_DELEGATION_FOR_QNAME',
+                        `${qname} は権威サーバーから下位ゾーンへの委任 NS レコードを取得できませんでした。入力名はゾーン頂点ではないため、委任状態を確認できません。`,
+                        currentNs,
+                        currentParent,
+                        { parentLogId: currentParentLogId }
+                    );
+                    hasNoDelegationForQname = true;
+                    break;
+                }
             }
 
             qnameIndex++;
