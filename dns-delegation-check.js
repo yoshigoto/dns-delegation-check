@@ -417,7 +417,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             pushExplorationLog('UNEXPECTED_RESPONSE', `委任情報を特定できない応答です (${serverIp}, qname: ${qname}, rcode: ${res.rcode}, AA: ${isAuthoritative})。`, currentNs, currentParent, { parentLogId: currentParentLogId });
         }
 
-        if (zoneApex || hasCnameOrDname || hasAddressRecordWithoutDelegation || hasNoDelegationForQname) break;
+        if (zoneApex || hasCnameOrDname || hasNoDelegationForQname) break;
         if (!delegation) {
             const childNsResponse = authoritativeResponses.find(({ answers }) =>
                 answers.some(record => record.type === 'NS' && normalizeDnsName(record.name) === qname)
@@ -519,11 +519,11 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         }
     }
 
-    if (!hasCnameOrDname && !hasAddressRecordWithoutDelegation && !hasNoDelegationForQname && lastColocatedDelegation) {
+    if (!hasCnameOrDname && !hasNoDelegationForQname && lastColocatedDelegation) {
         zoneApex = lastColocatedDelegation.zoneApex;
         parentDelegationUnavailable = true;
         pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンと同じ権威サーバーで提供されているため、親側の委任情報は使用できません。`, currentNs, parentNs || null, { parentLogId: colocatedParentLogId });
-    } else if (!hasCnameOrDname && !hasAddressRecordWithoutDelegation && !hasNoDelegationForQname && lastDelegatedZone) {
+    } else if (!hasCnameOrDname && !hasNoDelegationForQname && lastDelegatedZone) {
         zoneApex = lastDelegatedZone;
         pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンの委任情報を使用して検査します。`, currentNs, parentNs || null);
     }

@@ -154,7 +154,7 @@ test('非権威応答の CNAME でもゾーン頂点探索を終了する', asyn
     assert.equal(result.explorationLogs.at(-1).status, 'CNAME_FOUND');
 });
 
-test('A レコード応答で委任 NS がなければ委任検査を終了する', async () => {
+test('A レコード応答では直前に委任されたゾーンを頂点として確定する', async () => {
     const dependencies = createZoneApexTestDependencies([
         { qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('com', 'ns.com', '192.0.2.2') },
         { qname: 'example.com', serverIp: '192.0.2.2', qType: 'NS', value: referralResponse('example.com', 'ns.example.com', '192.0.2.3') },
@@ -169,9 +169,14 @@ test('A レコード応答で委任 NS がなければ委任検査を終了す�
 
     const result = await getZoneApex('host.example.com', new Map(), dependencies);
 
-    assert.equal(result.zoneApex, '');
+    assert.equal(result.zoneApex, 'example.com');
     assert.equal(result.hasAddressRecordWithoutDelegation, true);
-    assert.equal(result.explorationLogs.at(-1).status, 'ADDRESS_RECORD_FOUND');
+    assert.deepEqual(result.explorationLogs.map(log => log.status), [
+        'FOLLOW_DELEGATION',
+        'FOLLOW_DELEGATION',
+        'ADDRESS_RECORD_FOUND',
+        'ZONE_APEX_FOUND'
+    ]);
 });
 
 test('委任のない権威応答でゾーン頂点探索を終了する', async () => {
