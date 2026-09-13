@@ -394,7 +394,7 @@ async function startTrace() {
 
     if (!domain) return alert('ドメイン名を入力してください');
 
-    container.innerHTML = '<div style="text-align:center; color:#666; padding-top:40px;">DNSの委任関係、NSレコード、およびGlueレコードを検証中...</div>';
+    container.innerHTML = '<div style="text-align:center; color:#666; padding-top:40px;">DNS の委任関係、NS レコード、および Glue レコードを検証中...</div>';
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000);
@@ -437,8 +437,8 @@ function isNameServerAddressResolutionFailure(item) {
     return (
         status === 'LAME_DELEGATION_NO_NS_IP_ADDRESS' ||
         /(?:NS_)?(?:IP|ADDRESS)_(?:RESOLUTION_)?(?:FAILED|ERROR|NOT_FOUND|MISSING|UNAVAILABLE)/.test(status) ||
-        /(?:ネームサーバー|NS|名前サーバー).{0,30}(?:IPアドレス).{0,30}(?:取得できません|取得不可|解決できません|見つかりません|存在しません)/.test(detail) ||
-        /(?:IPアドレス).{0,30}(?:取得できません|取得不可|解決できません|見つかりません|存在しません)/.test(detail)
+        /(?:ネームサーバー|NS|名前サーバー).{0,30}(?:IP\s*アドレス).{0,30}(?:取得できません|取得不可|解決できません|見つかりません|存在しません)/.test(detail) ||
+        /(?:IP\s*アドレス).{0,30}(?:取得できません|取得不可|解決できません|見つかりません|存在しません)/.test(detail)
     );
 }
 
@@ -489,7 +489,7 @@ function buildSummary(logData) {
             tone: failureEntries.length > 0 || maxDepthCount > 0 || missingAuthorityNsCount > 0 ? 'warning' : 'success'
         },
         {
-            label: 'NS IPアドレス未取得',
+            label: 'NS IP アドレス未取得',
             value: nameServerAddressFailures.length > 0 ? `${nameServerAddressFailures.length} 件` : 'なし',
             tone: nameServerAddressFailures.length > 0 ? 'warning' : 'success'
         },

@@ -74,7 +74,7 @@ function summarizeRfc9471Referral(nsRecords, additionals, retryFrom = '') {
             ? `in-domain glue: [${inDomainGlueNames.join(', ')}]`
             : `ADDITIONAL SECTION に存在しない in-domain NS: [${missingInDomainGlueNames.join(', ')}] → 親ゾーンで利用可能な glue が存在するかは応答だけでは判定できません。`;
     const nonInDomainNote = nonInDomainAddressNames.length > 0
-        ? `ADDITIONAL SECTION に存在するゾーン外 NS の IPアドレス: ${nonInDomainAddressNames.join(', ')} → sibling glue である可能性がありますが、このツールでは glue として採用しません。`
+        ? `ADDITIONAL SECTION に存在するゾーン外 NS の IP アドレス: ${nonInDomainAddressNames.join(', ')} → sibling glue である可能性がありますが、このツールでは glue として採用しません。`
         : '';
 
     return [transportNote, inDomainNote, nonInDomainNote].filter(Boolean).join('\r');
@@ -488,7 +488,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         if (nextServerIPs.length === 0) {
             pushExplorationLog(
                 'LAME_DELEGATION_NO_NS_IP_ADDRESS',
-                `委任先 NSレコード (${nextNsNames.join(', ')}) の IPアドレスを取得できないため、ゾーン頂点を確認できません。`,
+                `委任先 NS レコード (${nextNsNames.join(', ')}) の IP アドレスを取得できないため、ゾーン頂点を確認できません。`,
                 currentNs,
                 currentParent
             );
@@ -602,7 +602,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
 
         if (isAuthoritative && answers.length === 0) {
             logEntry.status = 'LAME_DELEGATION_NO_ZONE';
-            logEntry.detail = `AUTHORITYとして指定されていますが、ゾーンを保持していません (NSレコードが存在しません)。${cacheNote}`;
+            logEntry.detail = `AUTHORITYとして指定されていますが、ゾーンを保持していません (NS レコードが存在しません)。${cacheNote}`;
             results.push(logEntry);
             continue;
         }
@@ -622,19 +622,19 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                 if (isMatch) {
                     logEntry.nsMatch = {
                         success: true,
-                        msg: `✅ NS情報一致！${cacheNote}\r委任情報: [${parentNSListNormalized.sort().join(', ')}]`
+                        msg: `✅ NS 情報一致！${cacheNote}\r委任情報: [${parentNSListNormalized.sort().join(', ')}]`
                     };
                 } else {
                     logEntry.nsMatch = {
                         success: false, 
-                        msg: `⚠️ NS情報不一致！\r親が保持する委任情報: [${parentNSListNormalized.sort().join(', ')}]\r子が保持する NS情報: [${childNSList.sort().join(', ')}]${cacheNote}`
+                        msg: `⚠️ NS 情報不一致！\r親が保持する委任情報: [${parentNSListNormalized.sort().join(', ')}]\r子が保持する NS 情報: [${childNSList.sort().join(', ')}]${cacheNote}`
                     };
                     logEntry.status = 'LAME_DELEGATION_NOT_MATCH';
                 }
             } else if (childNSList.length === 0 && parentNSListNormalized.length > 0) {
                 logEntry.nsMatch = {
                     success: false,
-                    msg: `⚠️ NS情報不一致！\r親が保持する委任情報: [${parentNSListNormalized.sort().join(', ')}]\r子が保持する NS情報: (NSレコードが存在しません)${cacheNote}`
+                        msg: `⚠️ NS 情報不一致！\r親が保持する委任情報: [${parentNSListNormalized.sort().join(', ')}]\r子が保持する NS 情報: (NS レコードが存在しません)${cacheNote}`
                 };
                 logEntry.status = 'LAME_DELEGATION_NOT_MATCH';
             }
@@ -655,12 +655,12 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                         if (isGlueMatch) {
                             logEntry.glueMatch = {
                                 success: true,
-                                msg: `✅ IPアドレス一致！【${currentNSName}】\r子の IPアドレス: [${sortedChild.sort().join(', ')}]`
+                                msg: `✅ IP アドレス一致！【${currentNSName}】\r子の IP アドレス: [${sortedChild.sort().join(', ')}]`
                             };
                         } else {
                             logEntry.glueMatch = {
                                 success: false,
-                                msg: `⚠️ IPアドレス不一致！【${currentNSName}】\r親が保持する子情報: [${sortedParent.sort().join(', ')}]\r子の IPアドレス: [${sortedChild.sort().join(', ')}]`
+                                msg: `⚠️ IP アドレス不一致！【${currentNSName}】\r親が保持する子情報: [${sortedParent.sort().join(', ')}]\r子の IP アドレス: [${sortedChild.sort().join(', ')}]`
                             };
                             logEntry.status = 'LAME_DELEGATION_NOT_MATCH';
                         }
@@ -668,7 +668,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                 } else {
                     logEntry.glueMatch = { 
                         success: false, 
-                        msg: `⚠️ IPアドレス不一致！【${currentNSName}】IPアドレスを得られませんでした。`
+                        msg: `⚠️ IP アドレス不一致！【${currentNSName}】IP アドレスを得られませんでした。`
                     };
                     logEntry.status = 'LAME_DELEGATION_NO_IP_ADDRESS';
                 }
@@ -686,7 +686,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
         const nsRecords = authorities.filter(r => r.type === 'NS' && hasParentChildRelationship(domain, r.name));
         if (nsRecords.length > 0) {
             logEntry.status = 'DELEGATED';
-            logEntry.detail = `AUTHORITY SECTION に ${nsRecords.length} 個の NSレコード。IPアドレスを以下に列挙。${cacheNote}`;
+            logEntry.detail = `AUTHORITY SECTION に ${nsRecords.length} 個の NS レコード。IP アドレスを以下に列挙。${cacheNote}`;
             results.push(logEntry);
 
             const currentNSNames = nsRecords.map(r => normalizeDnsName(r.data));
@@ -708,7 +708,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                         nextGlueMap[nsKey].push(g.data);
                     });
                 } else {
-                    // 本来の意味での Glueが無かった場合に、親が持つ子情報から IPアドレスを取得してリストに登録
+                    // 本来の意味での Glue が無かった場合に、親が持つ子情報から IP アドレスを取得してリストに登録
                     const resolvedIPs = await resolveIPs(ns.data);
                     if (resolvedIPs) {
                         resolvedIPs.forEach(ip => {
@@ -726,7 +726,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             } else {
                 results.push({
                     server: currentNSNames.join(', '), parent: serverIp, status: 'LAME_DELEGATION_NO_NS_IP_ADDRESS',
-                    detail: `委任先 NSレコード (${currentNSNames.join(', ')}) の IPアドレスを取得できないため、追跡を継続できません。`
+                    detail: `委任先 NS レコード (${currentNSNames.join(', ')}) の IP アドレスを取得できないため、追跡を継続できません。`
                 });
             }
         } else {
