@@ -358,7 +358,11 @@
 const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
 const initialDomain = urlParams.get('domain');
 if (initialDomain) {
-    document.getElementById('domain').value = initialDomain;
+    const normalizedInitialDomain = normalizeUserDomain(initialDomain);
+    if (normalizedInitialDomain) {
+        document.getElementById('domain').value = normalizedInitialDomain;
+        startTrace();
+    }
 }
 
 function normalizeUserDomain(value) {

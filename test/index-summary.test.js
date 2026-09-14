@@ -42,11 +42,77 @@ function loadBuildSummary() {
     };
 }
 
+function loadPageWithSearch(search = '', fetchImpl) {
+    const domainInput = createElement();
+    const summaryPanel = createElement();
+    const resultContainer = createElement();
+    const context = {
+        URL,
+        URLSearchParams,
+        AbortController,
+        setTimeout,
+        clearTimeout,
+        fetch: fetchImpl || (async () => ({
+            json: async () => ({
+                success: true,
+                zoneApexLog: [{ status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' }],
+                traceLog: [{ status: 'SUCCESS', detail: '委任は正常です。' }]
+            })
+        })),
+        window: { location: { search } },
+        alert() {},
+        document: {
+            createElement,
+            getElementById(id) {
+                if (id === 'domain') return domainInput;
+                if (id === 'summary-panel') return summaryPanel;
+                if (id === 'result-container') return resultContainer;
+                return null;
+            }
+        }
+    };
+    const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+    const script = html.match(/<script>([\s\S]*)<\/script>/)[1];
+
+    vm.runInNewContext(script, context);
+    return {
+        domainInput,
+        summaryPanel,
+        resultContainer,
+        startTrace: context.startTrace
+    };
+}
+
 function renderVerdict(logData, parentDelegationUnavailable = false, delegationLogData = logData) {
     const { buildSummary, summaryPanel } = loadBuildSummary();
     buildSummary(logData, parentDelegationUnavailable, delegationLogData);
     return summaryPanel.children[0].textContent;
 }
+
+test('domain クエリがあると自動で解析を開始する', async () => {
+    let fetchCalled = false;
+    let fetchResolved;
+    const fetchPromise = new Promise(resolve => {
+        fetchResolved = resolve;
+    });
+
+    loadPageWithSearch('?domain=example.com', async (url, options) => {
+        fetchCalled = true;
+        assert.equal(url, './api/trace');
+        assert.equal(JSON.parse(options.body).domain, 'example.com');
+        fetchResolved();
+        return {
+            json: async () => ({
+                success: true,
+                zoneApexLog: [{ status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' }],
+                traceLog: [{ status: 'SUCCESS', detail: '委任は正常です。' }]
+            })
+        };
+    });
+
+    await fetchPromise;
+    assert.equal(fetchCalled, true);
+});
 
 test('verdictがゾーン頂点探索と委任追跡の結果を概要表示する', () => {
     assert.equal(renderVerdict([
