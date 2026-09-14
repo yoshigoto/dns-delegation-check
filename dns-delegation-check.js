@@ -546,13 +546,14 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     };
 }
 
-async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, currentDepth = 1, expectedNSList = [], parentGlueMap = {}, dependencies = {}) {
+async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, currentDepth = 1, expectedNSList = [], parentGlueMap = {}, dependencies = {}, serverNameMap = {}) {
     const resolveIPs = dependencies.resolveServerIPs || resolveServerIPs;
     const queryUDP = dependencies.queryDirectlyUDP || queryDirectlyUDP;
     let results = [];
     if (currentDepth > 10) {
         results.push({
             server: servers[0] || '',
+            serverName: serverNameMap[servers[0]] || '',
             parent: parentIP,
             status: 'LAME_DELEGATION_MAX_DEPTH',
             detail: `委任チェーンが上限 (${10}) に達したため、以降の追跡を打ち切りました。`,
@@ -565,6 +566,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
     for (const serverIp of servers) {
         let logEntry = {
             server: serverIp,
+            serverName: serverNameMap[serverIp] || '',
             parent: parentIP,
             status: 'Querying',
             detail: '',
@@ -695,6 +697,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
 
             let nextGlueMap = {};
             let nextServerIPs = [];
+            let nextServerNameMap = {};
 
             for (const ns of nsRecords) {
                 const nsKey = normalizeDnsName(ns.data);
@@ -706,6 +709,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                     matchedGlues.forEach(g => {
                         nextServerIPs.push(g.data);
                         nextGlueMap[nsKey].push(g.data);
+                        nextServerNameMap[g.data] = nsKey;
                     });
                 } else {
                     // 本来の意味での Glue が無かった場合に、親が持つ子情報から IP アドレスを取得してリストに登録
@@ -713,6 +717,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                     if (resolvedIPs) {
                         resolvedIPs.forEach(ip => {
                             nextServerIPs.push(ip);
+                            nextServerNameMap[ip] = nsKey;
                         });
                     }
                 }
@@ -721,7 +726,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             nextServerIPs = [...new Set(nextServerIPs)];
 
             if (nextServerIPs.length > 0) {
-                const childResults = await traceDomain(domain, nextServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap, dependencies);
+                const childResults = await traceDomain(domain, nextServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap, dependencies, nextServerNameMap);
                 results = results.concat(childResults);
             } else {
                 results.push({
@@ -773,7 +778,8 @@ app.post('/api/trace', async (req, res) => {
             const serverList = zoneApexInfo.parentServerIPs.length > 0
                 ? zoneApexInfo.parentServerIPs
                 : await resolveServerIPs('a.root-servers.net');
-            traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {});
+            const serverNameMap = Object.fromEntries(serverList.map(serverIp => [serverIp, zoneApexInfo.parentNs || 'a.root-servers.net']));
+            traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {}, {}, serverNameMap);
         } else if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && zoneApexInfo.parentDelegationUnavailable) {
             const dsConfirmation = zoneApexInfo.colocatedDelegation?.dsConfirmsDelegation
                 ? ' DS レコードによりゾーンカットの存在は確認しました。'

@@ -241,9 +241,11 @@
 
         .server-ip {
             font-weight: bold;
-            width: 280px;
+            width: 360px;
             flex-shrink: 0;
             font-family: monospace;
+            white-space: normal;
+            overflow-wrap: anywhere;
         }
         .server-status {
             font-size: 11px;
@@ -619,7 +621,7 @@ function renderLogTree(logData, target) {
 
             const serverIp = document.createElement('span');
             serverIp.className = 'server-ip';
-            serverIp.textContent = node.server;
+            serverIp.textContent = node.serverName ? `${node.server} (${node.serverName})` : node.server;
 
             const serverStatus = document.createElement('span');
             serverStatus.className = `server-status ${typeKey}-bg status-badge`;

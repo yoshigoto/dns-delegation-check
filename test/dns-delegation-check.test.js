@@ -99,7 +99,7 @@ test('RFC 9471 要約で in-domain glue の不足とゾーン外アドレスを�
 
     assert.match(summary, /TCP で再取得しました/);
     assert.match(summary, /in-domain glue: \[ns1\.child\.example\.com\]/);
-    assert.match(summary, /ゾーン外 NS の追加アドレス: ns2\.external\.example\.net/);
+    assert.match(summary, /ゾーン外 NS の IP アドレス: ns2\.external\.example\.net/);
 });
 
 test('ゾーン頂点探索は CNAME と DNAME で終了ログを記録する', async (t) => {
@@ -456,6 +456,8 @@ test('委任先の glue と権威 NS が一致すれば SUCCESS になる', asyn
     );
 
     assert.deepEqual(result.map(log => log.status), ['DELEGATED', 'SUCCESS']);
+    assert.equal(result[1].server, '192.0.2.20');
+    assert.equal(result[1].serverName, 'ns1.child.example.com');
     assert.equal(result[1].nsMatch.success, true);
     assert.equal(result[1].glueMatch.success, true);
 });
