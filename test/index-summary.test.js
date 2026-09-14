@@ -42,9 +42,9 @@ function loadBuildSummary() {
     };
 }
 
-function renderVerdict(logData, parentDelegationUnavailable = false) {
+function renderVerdict(logData, parentDelegationUnavailable = false, delegationLogData = logData) {
     const { buildSummary, summaryPanel } = loadBuildSummary();
-    buildSummary(logData, parentDelegationUnavailable);
+    buildSummary(logData, parentDelegationUnavailable, delegationLogData);
     return summaryPanel.children[0].textContent;
 }
 
@@ -67,6 +67,14 @@ test('verdictがゾーン頂点探索と委任追跡の結果を概要表示す�
         { status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' },
         { status: 'NETWORK_ERROR', detail: '通信エラーです。' }
     ]), '⚠️  要確認: 通信エラーにより委任状態を確認できません');
+
+    assert.equal(renderVerdict([
+        { status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' },
+        { status: 'NETWORK_ERROR', detail: 'ゾーン頂点探索中の通信エラーです。' },
+        { status: 'SUCCESS', detail: '委任は正常です。' }
+    ], false, [
+        { status: 'SUCCESS', detail: '委任は正常です。' }
+    ]), '✅  正常: 正しく委任されています');
 
     assert.equal(renderVerdict([
         { status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' },
