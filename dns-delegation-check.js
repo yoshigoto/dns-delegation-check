@@ -323,8 +323,10 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     const queryUDP = dependencies.queryDirectlyUDP || queryDirectlyUDP;
     let currentNs = 'a.root-servers.net';
     let currentServerIPs = await resolveIPs(currentNs);
+    let currentServerNameMap = Object.fromEntries((currentServerIPs || []).map(serverIp => [serverIp, currentNs]));
     let parentNs = '';
     let parentServerIPs = [];
+    let parentServerNameMap = {};
     let zoneApex = '';
     let hasCnameOrDname = false;
     let hasAddressRecordWithoutDelegation = false;
@@ -473,10 +475,23 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         const glueIPs = delegation.additionals
             .filter(record => isInBailiwickGlue(record, nextNsNames, delegation.nextZone))
             .map(record => record.data);
-        const resolvedIPs = glueIPs.length > 0
+        const nextServerNameMap = {};
+        glueIPs.forEach(serverIp => {
+            const glueRecord = delegation.additionals.find(record => record.data === serverIp && nextNsNames.includes(normalizeDnsName(record.name)));
+            if (glueRecord && !nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = normalizeDnsName(glueRecord.name);
+        });
+        const resolvedIPsByName = glueIPs.length > 0
             ? []
-            : await Promise.all(nextNsNames.map(resolveIPs));
-        const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPs.flat().filter(Boolean)])];
+            : await Promise.all(nextNsNames.map(async nsName => ({
+                nsName,
+                ips: await resolveIPs(nsName)
+            })));
+        resolvedIPsByName.forEach(({ nsName, ips }) => {
+            (ips || []).filter(Boolean).forEach(serverIp => {
+                if (!nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = nsName;
+            });
+        });
+        const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPsByName.flatMap(({ ips }) => (ips || []).filter(Boolean))])];
 
         const delegationLog = pushExplorationLog('FOLLOW_DELEGATION', `${qname} に対して ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
             parentLogId: currentParentLogId,
@@ -497,8 +512,12 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
 
         parentNs = currentNs;
         parentServerIPs = [delegation.serverIp];
+        parentServerNameMap = {
+            [delegation.serverIp]: currentServerNameMap[delegation.serverIp] || currentNs
+        };
         currentNs = nextNsNames.join(', ');
         currentServerIPs = nextServerIPs;
+        currentServerNameMap = nextServerNameMap;
         lastDelegatedZone = delegation.nextZone;
         qnameIndex++;
 
@@ -535,6 +554,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         currentNs: currentNs,
         parentNs: parentNs,
         parentServerIPs: parentServerIPs,
+        parentServerNameMap: parentServerNameMap,
         zoneApex: zoneApex,
         hasCnameOrDname,
         hasAddressRecordWithoutDelegation,
@@ -709,7 +729,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                     matchedGlues.forEach(g => {
                         nextServerIPs.push(g.data);
                         nextGlueMap[nsKey].push(g.data);
-                        nextServerNameMap[g.data] = nsKey;
+                        if (!nextServerNameMap[g.data]) nextServerNameMap[g.data] = nsKey;
                     });
                 } else {
                     // 本来の意味での Glue が無かった場合に、親が持つ子情報から IP アドレスを取得してリストに登録
@@ -717,7 +737,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                     if (resolvedIPs) {
                         resolvedIPs.forEach(ip => {
                             nextServerIPs.push(ip);
-                            nextServerNameMap[ip] = nsKey;
+                            if (!nextServerNameMap[ip]) nextServerNameMap[ip] = nsKey;
                         });
                     }
                 }
@@ -778,7 +798,7 @@ app.post('/api/trace', async (req, res) => {
             const serverList = zoneApexInfo.parentServerIPs.length > 0
                 ? zoneApexInfo.parentServerIPs
                 : await resolveServerIPs('a.root-servers.net');
-            const serverNameMap = Object.fromEntries(serverList.map(serverIp => [serverIp, zoneApexInfo.parentNs || 'a.root-servers.net']));
+            const serverNameMap = zoneApexInfo.parentServerNameMap || Object.fromEntries(serverList.map(serverIp => [serverIp, zoneApexInfo.parentNs || 'a.root-servers.net']));
             traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {}, {}, serverNameMap);
         } else if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && zoneApexInfo.parentDelegationUnavailable) {
             const dsConfirmation = zoneApexInfo.colocatedDelegation?.dsConfirmsDelegation

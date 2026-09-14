@@ -170,6 +170,7 @@ test('A レコード応答では直前に委任されたゾーンを頂点とし
     const result = await getZoneApex('host.example.com', new Map(), dependencies);
 
     assert.equal(result.zoneApex, 'example.com');
+    assert.equal(result.parentServerNameMap['192.0.2.2'], 'ns.com');
     assert.equal(result.hasAddressRecordWithoutDelegation, true);
     assert.deepEqual(result.explorationLogs.map(log => log.status), [
         'FOLLOW_DELEGATION',
