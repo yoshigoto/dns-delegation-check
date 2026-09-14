@@ -355,7 +355,7 @@
 </footer>
 
 <script>
-const urlParams = new URLSearchParams(window.location.search);
+const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
 const initialDomain = urlParams.get('domain');
 if (initialDomain) {
     document.getElementById('domain').value = initialDomain;
@@ -414,13 +414,14 @@ async function startTrace() {
         const data = await response.json();
         const zoneApexLog = Array.isArray(data.zoneApexLog) ? data.zoneApexLog : [];
         const traceLog = Array.isArray(data.traceLog) ? data.traceLog : [];
+        const parentDelegationUnavailable = data.parentDelegationUnavailable === true;
 
         if (!data.success || (zoneApexLog.length === 0 && traceLog.length === 0)) {
             container.innerHTML = '<div style="color:red; text-align:center; padding-top:40px;">データの取得に失敗しました。</div>';
             return;
         }
 
-        buildDualLogView(zoneApexLog, traceLog, container);
+        buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnavailable);
 
     } catch (e) {
         clearTimeout(timeoutId);
@@ -444,7 +445,7 @@ function isNameServerAddressResolutionFailure(item) {
     );
 }
 
-function buildSummary(logData) {
+function buildSummary(logData, parentDelegationUnavailable = false) {
     const summaryPanel = document.getElementById('summary-panel');
     summaryPanel.innerHTML = '';
     summaryPanel.classList.remove('visible');
@@ -466,7 +467,7 @@ function buildSummary(logData) {
     const addressRecordFound = logData.some(item => item.status === 'ADDRESS_RECORD_FOUND');
     const noDelegationForQname = logData.some(item => item.status === 'NO_DELEGATION_FOR_QNAME');
     const zoneApexLookupTimedOut = logData.some(item => item.status === 'ZONE_APEX_LOOKUP_TIMEOUT');
-    const colocatedDelegation = logData.some(item => item.status === 'COLOCATED_DELEGATION');
+    const colocatedDelegation = parentDelegationUnavailable;
     const isApexDetermined = apexName !== '未判定';
 
     const summaryItems = [
@@ -676,9 +677,9 @@ function renderLogTree(logData, target) {
     target.appendChild(mainListWrapper);
 }
 
-function buildDualLogView(zoneApexLog, traceLog, container) {
+function buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnavailable = false) {
     container.innerHTML = '';
-    buildSummary([...zoneApexLog, ...traceLog]);
+    buildSummary([...zoneApexLog, ...traceLog], parentDelegationUnavailable);
 
     const wrapper = document.createElement('div');
     wrapper.className = 'dual-log-layout';

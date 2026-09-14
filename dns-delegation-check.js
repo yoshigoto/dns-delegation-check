@@ -818,6 +818,7 @@ app.post('/api/trace', async (req, res) => {
 
         res.json({
             success: true,
+            parentDelegationUnavailable: zoneApexInfo.parentDelegationUnavailable === true,
             zoneApexLog: [...explorationLog],
             traceLog: [...traceLog]
         });

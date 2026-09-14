@@ -346,9 +346,12 @@ test('親子同居の後に正規の委任が続く場合、より深いゾー�
     ]);
 
     const result = await getZoneApex('sub.example.com', new Map(), dependencies);
+    const statuses = result.explorationLogs.map(log => log.status);
 
     assert.equal(result.zoneApex, 'sub.example.com');
     assert.equal(result.parentDelegationUnavailable, false);
+    assert.ok(statuses.includes('COLOCATED_DELEGATION'));
+    assert.equal(statuses.at(-1), 'ZONE_APEX_FOUND');
 });
 
 test('委任追跡の基本ステータスを判定する', async () => {
