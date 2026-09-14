@@ -324,6 +324,33 @@ test('親子同居のゾーン頂点探索ログを親子階層で保持する',
     assert.equal(apex.parent, 'ns.com');
 });
 
+test('親子同居の後に正規の委任が続く場合、より深いゾーンカットをゾーン頂点として確定する', async () => {
+    const dependencies = createZoneApexTestDependencies([
+        { qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('com', 'ns.com', '192.0.2.2') },
+        {
+            qname: 'example.com', serverIp: '192.0.2.2', qType: 'NS', value: {
+                flags: 1024,
+                answers: [{ type: 'NS', name: 'example.com', data: 'ns.com' }],
+                authorities: []
+            }
+        },
+        { qname: 'example.com', serverIp: '192.0.2.2', qType: 'DS', value: { flags: 1024, answers: [], authorities: [] } },
+        { qname: 'sub.example.com', serverIp: '192.0.2.2', qType: 'NS', value: referralResponse('sub.example.com', 'ns.sub.example.com', '192.0.2.3') },
+        {
+            qname: 'sub.example.com', serverIp: '192.0.2.3', qType: 'NS', value: {
+                flags: 1024,
+                answers: [],
+                authorities: []
+            }
+        }
+    ]);
+
+    const result = await getZoneApex('sub.example.com', new Map(), dependencies);
+
+    assert.equal(result.zoneApex, 'sub.example.com');
+    assert.equal(result.parentDelegationUnavailable, false);
+});
+
 test('委任追跡の基本ステータスを判定する', async () => {
     const matching = await traceDomain(
         'child.example.com',
