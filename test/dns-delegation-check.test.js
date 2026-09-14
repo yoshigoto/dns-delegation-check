@@ -99,7 +99,7 @@ test('RFC 9471 要約で in-domain glue の不足とゾーン外アドレスを�
 
     assert.match(summary, /TCP で再取得しました/);
     assert.match(summary, /in-domain glue: \[ns1\.child\.example\.com\]/);
-    assert.match(summary, /ゾーン外 NS の IP アドレス: ns2\.external\.example\.net/);
+    assert.match(summary, /ゾーン外 NS の IP アドレス \[ns2\.external\.example\.net\] は sibling glue である可能性がありますが、このツールでは glue として採用しません/);
 });
 
 test('ゾーン頂点探索は CNAME と DNAME で終了ログを記録する', async (t) => {
