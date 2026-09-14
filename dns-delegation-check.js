@@ -333,6 +333,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     let hasNoDelegationForQname = false;
     let explorationLogs = [];
     let lastDelegatedZone = '';
+    let lastDelegatedOrder = -1;
     let lastColocatedDelegation = null;
     let colocatedParentLogId = null;
 
@@ -440,7 +441,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             if (childNsResponse || dsConfirmsDelegation) {
                 parentNs = currentNs;
                 parentServerIPs = currentServerIPs;
-                lastColocatedDelegation = { zoneApex: qname, dsConfirmsDelegation };
+                lastColocatedDelegation = { zoneApex: qname, dsConfirmsDelegation, order: qnameIndex };
                 const colocatedLog = pushExplorationLog(
                     'COLOCATED_DELEGATION',
                     `${qname} は親ゾーンと同じ権威サーバーに存在する子ゾーンです。親側の referral は取得できず、親が保持する委任 NS との比較は DNS 問い合わせだけでは実施できません。${dsConfirmsDelegation ? ' DS レコードでゾーンカットを確認しました。' : ' 子ゾーンの apex NS 応答を確認しました。'}`,
@@ -519,6 +520,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         currentServerIPs = nextServerIPs;
         currentServerNameMap = nextServerNameMap;
         lastDelegatedZone = delegation.nextZone;
+        lastDelegatedOrder = qnameIndex;
         qnameIndex++;
 
         // 最終入力名への委任がある場合は、委任先で CNAME/DNAME か確認する。
@@ -541,7 +543,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         }
     }
 
-    if (!hasCnameOrDname && lastColocatedDelegation) {
+    if (!hasCnameOrDname && lastColocatedDelegation && lastColocatedDelegation.order > lastDelegatedOrder) {
         zoneApex = lastColocatedDelegation.zoneApex;
         parentDelegationUnavailable = true;
         pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンと同じ権威サーバーで提供されているため、親側の委任情報は使用できません。`, currentNs, parentNs || null, { parentLogId: colocatedParentLogId });
