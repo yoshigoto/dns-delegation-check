@@ -473,6 +473,9 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         }
 
         const nextNsNames = delegation.nsRecords.map(record => normalizeDnsName(record.data));
+        const inBailiwickGlueNames = new Set(delegation.additionals
+            .filter(record => isInBailiwickGlue(record, nextNsNames, delegation.nextZone))
+            .map(record => normalizeDnsName(record.name)));
         const glueIPs = delegation.additionals
             .filter(record => isInBailiwickGlue(record, nextNsNames, delegation.nextZone))
             .map(record => record.data);
@@ -481,24 +484,30 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             const glueRecord = delegation.additionals.find(record => record.data === serverIp && nextNsNames.includes(normalizeDnsName(record.name)));
             if (glueRecord && !nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = normalizeDnsName(glueRecord.name);
         });
-        const resolvedIPsByName = glueIPs.length > 0
-            ? []
-            : await Promise.all(nextNsNames.map(async nsName => ({
+        // in-bailiwick glue が無い NS 名は、他の NS 名が glue を持っていても個別に名前解決を試みる。
+        const nsNamesNeedingResolution = nextNsNames.filter(nsName => !inBailiwickGlueNames.has(nsName));
+        const resolvedIPsByName = nsNamesNeedingResolution.length > 0
+            ? await Promise.all(nsNamesNeedingResolution.map(async nsName => ({
                 nsName,
                 ips: await resolveIPs(nsName)
-            })));
+            })))
+            : [];
         resolvedIPsByName.forEach(({ nsName, ips }) => {
             (ips || []).filter(Boolean).forEach(serverIp => {
                 if (!nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = nsName;
             });
         });
         const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPsByName.flatMap(({ ips }) => (ips || []).filter(Boolean))])];
+        const unresolvedNsNames = resolvedIPsByName
+            .filter(({ ips }) => !ips || ips.length === 0)
+            .map(({ nsName }) => nsName);
 
         const delegationLog = pushExplorationLog('FOLLOW_DELEGATION', `${qname} に対して ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
             parentLogId: currentParentLogId,
             nextServer: nextNsNames,
             glueIPs,
-            rfc9471: summarizeRfc9471Referral(delegation.nsRecords, delegation.additionals)
+            rfc9471: summarizeRfc9471Referral(delegation.nsRecords, delegation.additionals),
+            nsResolutionWarning: unresolvedNsNames.length > 0 ? { names: unresolvedNsNames } : null
         });
 
         if (nextServerIPs.length === 0) {

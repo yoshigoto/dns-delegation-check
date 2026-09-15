@@ -449,6 +449,11 @@ function isNameServerAddressResolutionFailure(item) {
     );
 }
 
+// 一部の委任先 NS のみ名前解決に失敗したケース（他の NS で委任追跡は継続できる）を構造化フィールドで検出する。
+function hasPartialNsResolutionWarning(item) {
+    return !!(item && item.nsResolutionWarning && Array.isArray(item.nsResolutionWarning.names) && item.nsResolutionWarning.names.length > 0);
+}
+
 function buildSummary(logData, parentDelegationUnavailable = false, delegationLogData = logData) {
     const summaryPanel = document.getElementById('summary-panel');
     summaryPanel.innerHTML = '';
@@ -463,6 +468,7 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
     const failureEntries = logData.filter(item => item.status && item.status.startsWith('LAME_DELEGATION'));
     const delegationNetworkErrors = delegationLogData.filter(item => item.status === 'NETWORK_ERROR');
     const nameServerAddressFailures = logData.filter(isNameServerAddressResolutionFailure);
+    const partialNsResolutionWarnings = logData.filter(hasPartialNsResolutionWarning);
     const successCount = logData.filter(item => item.status === 'SUCCESS').length;
     const missingAuthorityNsCount = logData.filter(item => item.status === 'LAME_DELEGATION_NO_AUTHORITY_NS').length;
     const maxDepthCount = logData.filter(item => item.status === 'LAME_DELEGATION_MAX_DEPTH').length;
@@ -501,6 +507,13 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
             tone: nameServerAddressFailures.length > 0 ? 'warning' : 'success'
         },
         {
+            label: '一部 NS 名前解決失敗',
+            value: partialNsResolutionWarnings.length > 0
+                ? partialNsResolutionWarnings.flatMap(item => item.nsResolutionWarning.names).join(', ')
+                : 'なし',
+            tone: partialNsResolutionWarnings.length > 0 ? 'warning' : 'success'
+        },
+        {
             label: '通信エラー',
             value: delegationNetworkErrors.length > 0 ? `${delegationNetworkErrors.length} 件` : 'なし',
             tone: delegationNetworkErrors.length > 0 ? 'warning' : 'success'
@@ -526,7 +539,7 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
             ? '⚠️  検査対象外: 親子ゾーンが同じ権威サーバーのため、親子 NS 情報を比較しません'
             : nameServerAddressFailures.length > 0
                 ? '⚠️  要確認: 権威サーバーについて名前解決できないため、委任状態を確認できません'
-            : failureEntries.length > 0 || maxDepthCount > 0 || missingAuthorityNsCount > 0
+            : failureEntries.length > 0 || maxDepthCount > 0 || missingAuthorityNsCount > 0 || partialNsResolutionWarnings.length > 0
                 ? '⚠️  異常検出: 委任に不整合があります'
             : delegationNetworkErrors.length > 0
                 ? '⚠️  要確認: 通信エラーにより委任状態を確認できません'
@@ -539,6 +552,7 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
         failureEntries.length > 0 ||
         maxDepthCount > 0 ||
         missingAuthorityNsCount > 0 ||
+        partialNsResolutionWarnings.length > 0 ||
         delegationNetworkErrors.length > 0
             ? 'warning'
             : 'success'
@@ -661,6 +675,13 @@ function renderLogTree(logData, target) {
                 matchDiv.className = `ns-match-box ${node.nsMatch.success ? 'match-success' : 'match-fail'}`;
                 matchDiv.innerText = node.nsMatch.msg;
                 itemBlock.appendChild(matchDiv);
+            }
+
+            if (node.nsResolutionWarning && Array.isArray(node.nsResolutionWarning.names) && node.nsResolutionWarning.names.length > 0) {
+                const warningDiv = document.createElement('div');
+                warningDiv.className = 'ns-match-box match-fail';
+                warningDiv.innerText = `⚠️ 委任先 NS (${node.nsResolutionWarning.names.join(', ')}) の名前解決に失敗しました。他の NS で追跡を継続します。`;
+                itemBlock.appendChild(warningDiv);
             }
 
             li.appendChild(itemBlock);
