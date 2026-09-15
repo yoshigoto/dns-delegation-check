@@ -67,6 +67,20 @@ function getReferralAddressRecords(additionals, nsNames) {
     );
 }
 
+async function resolveAuthoritativeServerIPs(name, serverIp, dnsResponseCache, queryUDP) {
+    const responses = await Promise.all(['A', 'AAAA'].map(async type =>
+        queryUDP(name, serverIp, dnsResponseCache, type)
+    ));
+    return [...new Set(responses.flatMap(response =>
+        (response.error ? [] : (response.answers || []))
+            .filter(record =>
+                (record.type === 'A' || record.type === 'AAAA') &&
+                normalizeDnsName(record.name) === normalizeDnsName(name)
+            )
+            .map(record => record.data)
+    ))];
+}
+
 function getMinimizedQnames(domain) {
     const labels = normalizeDnsName(domain).split('.');
     return labels.map((_, index) => labels.slice(index).join('.')).reverse();
@@ -288,16 +302,19 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
 
         // 最終入力名への委任がある場合は、委任先で CNAME/DNAME か確認する。
         if (qnameIndex >= minimizedQnames.length) {
-            for (const nextServerIp of currentServerIPs) {
-                const childResponse = await queryUDP(qname, nextServerIp, dnsResponseCache, 'NS');
+            const childResponses = await Promise.all(currentServerIPs.map(async nextServerIp => ({
+                serverIp: nextServerIp,
+                response: await queryUDP(qname, nextServerIp, dnsResponseCache, 'NS')
+            })));
+            for (const { serverIp, response: childResponse } of childResponses) {
                 if (childResponse.error) continue;
 
                 const childCnameRecord = (childResponse.answers || []).find(record => record.type === 'CNAME');
                 const childDnameRecord = (childResponse.answers || []).find(record => record.type === 'DNAME');
                 if (childCnameRecord || childDnameRecord) {
                     const detail = childCnameRecord
-                        ? `入力名は CNAME (${normalizeDnsName(childCnameRecord.name)} -> ${normalizeDnsName(childCnameRecord.data)}) です。CNAME の委任先は追跡せず、ゾーン頂点としての委任検査を終了します。 (${nextServerIp})`
-                        : `回答に DNAME が含まれており、ゾーン頂点を確定できませんでした。 (${nextServerIp})`;
+                        ? `入力名は CNAME (${normalizeDnsName(childCnameRecord.name)} -> ${normalizeDnsName(childCnameRecord.data)}) です。CNAME の委任先は追跡せず、ゾーン頂点としての委任検査を終了します。 (${serverIp})`
+                        : `回答に DNAME が含まれており、ゾーン頂点を確定できませんでした。 (${serverIp})`;
                     pushExplorationLog(childCnameRecord ? 'CNAME_FOUND' : 'DNAME_FOUND', detail, currentNs, currentNs, { parentLogId: delegationLog.id });
                     hasCnameOrDname = true;
                     break;
@@ -348,7 +365,8 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
         return results;
     }
 
-    for (const serverIp of servers) {
+    const serverResults = await Promise.all(servers.map(async (serverIp) => {
+        let results = [];
         let logEntry = {
             server: serverIp,
             serverName: serverNameMap[serverIp] || '',
@@ -369,14 +387,14 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                 logEntry.detail = `サーバーから応答がありません。`;
             }
             results.push(logEntry);
-            continue; 
+            return results;
         }
 
         if (res.error === 'SEND_ERROR' || res.error === 'SOCKET_ERROR' || res.error === 'DECODE_ERROR') {
             logEntry.status = 'NETWORK_ERROR';
             logEntry.detail = `エラー: ${res.detail}`;
             results.push(logEntry);
-            continue;
+            return results;
         }
 
         const AUTHORITATIVE_ANSWER = dnsPacket.AUTHORITATIVE_ANSWER || 1024;
@@ -391,7 +409,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             logEntry.status = 'LAME_DELEGATION_NO_ZONE';
             logEntry.detail = `AUTHORITYとして指定されていますが、ゾーンを保持していません (NS レコードが存在しません)。${cacheNote}`;
             results.push(logEntry);
-            continue;
+            return results;
         }
 
         if (isAuthoritative && answers.length > 0) {
@@ -429,7 +447,8 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             const currentNSName = Object.keys(parentGlueMap).find(name => parentGlueMap[name].includes(serverIp));
 
             if (currentNSName) {
-                const childIPs = await resolveIPs(currentNSName);
+                const authoritativeIPs = await resolveAuthoritativeServerIPs(currentNSName, serverIp, dnsResponseCache, queryUDP);
+                const childIPs = authoritativeIPs.length > 0 ? authoritativeIPs : await resolveIPs(currentNSName);
                 const parentGlueIPs = parentGlueMap[currentNSName] || [];
 
                 if (childIPs) {
@@ -467,7 +486,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                 logEntry.detail = `正しく委任できています。${cacheNote}`;
             }
             results.push(logEntry);
-            continue;
+            return results;
         }
 
         const nsRecords = authorities.filter(r => r.type === 'NS' && hasParentChildRelationship(domain, r.name));
@@ -527,8 +546,9 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             logEntry.detail = `権威サーバーが AUTHORITY セクションに NS レコードを持っていません。委任情報が欠落している可能性があります。${cacheNote}`;
             results.push(logEntry);
         }
-    }
-    return results;
+        return results;
+    }));
+    return serverResults.flat();
 }
 
 app.post('/api/trace', async (req, res) => {

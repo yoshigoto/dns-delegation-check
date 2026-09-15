@@ -435,6 +435,35 @@ test('委任追跡のエラー・空応答・最大深度を記録する', async
     assert.equal(maxDepth[0].status, 'LAME_DELEGATION_MAX_DEPTH');
 });
 
+test('複数の委任先 NS は並列に問い合わせ、タイムアウト待ちを累積しない', async () => {
+    const queryDelayMs = 30;
+    const startedAt = Date.now();
+    const result = await traceDomain(
+        'child.example.com',
+        ['192.0.2.10', '192.0.2.11', '192.0.2.12'],
+        new Map(),
+        null,
+        1,
+        [],
+        {},
+        {
+            resolveServerIPs: async () => null,
+            queryDirectlyUDP: async () => {
+                await new Promise(resolve => setTimeout(resolve, queryDelayMs));
+                return { error: 'TIMEOUT' };
+            }
+        }
+    );
+
+    assert.equal(result.length, 3);
+    assert.ok(Date.now() - startedAt < queryDelayMs * 2, '委任先 NS への問い合わせは並列に実行される');
+    assert.deepEqual(result.map(log => log.status), [
+        'LAME_DELEGATION_TIMEOUT',
+        'LAME_DELEGATION_TIMEOUT',
+        'LAME_DELEGATION_TIMEOUT'
+    ]);
+});
+
 test('委任先の IP がない場合は追跡不能として記録する', async () => {
     const result = await traceDomain(
         'child.example.com',
@@ -529,6 +558,41 @@ test('委任先の glue と権威 NS が一致すれば SUCCESS になる', asyn
     assert.equal(result[1].serverName, 'ns1.child.example.com');
     assert.equal(result[1].nsMatch.success, true);
     assert.equal(result[1].glueMatch.success, true);
+});
+
+test('Glue 比較では子ゾーン権威サーバーから得た NS の IP を再帰的名前解決より優先する', async () => {
+    const result = await traceDomain(
+        'child.example.com',
+        ['192.0.2.20'],
+        new Map(),
+        null,
+        1,
+        ['ns1.child.example.com'],
+        { 'ns1.child.example.com': ['192.0.2.20'] },
+        {
+            resolveServerIPs: async () => null,
+            queryDirectlyUDP: async (name, serverIp, cache, type) => {
+                assert.equal(serverIp, '192.0.2.20');
+                if (type === 'NS') {
+                    return {
+                        flags: 1024,
+                        answers: [{ type: 'NS', name: 'child.example.com', data: 'ns1.child.example.com' }],
+                        authorities: []
+                    };
+                }
+                return {
+                    flags: 1024,
+                    answers: type === 'A'
+                        ? [{ type: 'A', name, data: '192.0.2.20' }]
+                        : [],
+                    authorities: []
+                };
+            }
+        }
+    );
+
+    assert.equal(result[0].status, 'SUCCESS');
+    assert.equal(result[0].glueMatch.success, true);
 });
 
 test('委任先の IP 不在と Glue の IP 不一致を検出する', async () => {
