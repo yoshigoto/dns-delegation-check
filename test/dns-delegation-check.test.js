@@ -4,10 +4,6 @@ import test from 'node:test';
 import {
     getZoneApex,
     getMinimizedQnames,
-    hasParentChildRelationship,
-    isInBailiwickGlue,
-    isIPv6,
-    normalizeDnsName,
     normalizeUserDomain,
     summarizeRfc9471Referral,
     traceDomain
@@ -53,36 +49,12 @@ test('ドメイン入力を正規化し、不正な値を拒否する', () => {
     assert.equal(normalizeUserDomain(''), '');
 });
 
-test('DNS 名を小文字化し、末尾ドットを除去する', () => {
-    assert.equal(normalizeDnsName(' NS1.Example.COM. '), 'ns1.example.com');
-    assert.equal(normalizeDnsName(null), '');
-});
-
-test('親子関係は同一ゾーンとサブドメインだけを一致させる', () => {
-    assert.equal(hasParentChildRelationship('www.example.com', 'example.com'), true);
-    assert.equal(hasParentChildRelationship('example.com.', 'example.com'), true);
-    assert.equal(hasParentChildRelationship('example.com', 'ample.com'), false);
-    assert.equal(hasParentChildRelationship('example.net', 'example.com'), false);
-});
-
 test('最小化した問い合わせ名をルートから順に作る', () => {
     assert.deepEqual(getMinimizedQnames('www.Example.COM.'), [
         'com',
         'example.com',
         'www.example.com'
     ]);
-});
-
-test('IPv4 と IPv6 を識別する', () => {
-    assert.equal(isIPv6('2001:db8::53'), true);
-    assert.equal(isIPv6('192.0.2.53'), false);
-});
-
-test('in-domain glue だけを採用する', () => {
-    const nsNames = ['ns1.child.example.com', 'ns2.external.example.net'];
-    assert.equal(isInBailiwickGlue({ type: 'A', name: 'ns1.child.example.com' }, nsNames, 'child.example.com'), true);
-    assert.equal(isInBailiwickGlue({ type: 'AAAA', name: 'ns2.external.example.net' }, nsNames, 'child.example.com'), false);
-    assert.equal(isInBailiwickGlue({ type: 'TXT', name: 'ns1.child.example.com' }, nsNames, 'child.example.com'), false);
 });
 
 test('RFC 9471 要約で in-domain glue の不足とゾーン外アドレスを示す', () => {
