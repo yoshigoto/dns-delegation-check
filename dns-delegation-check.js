@@ -67,6 +67,18 @@ function getReferralAddressRecords(additionals, nsNames) {
     );
 }
 
+function getKnownAddresses(additionals) {
+    const knownAddresses = new Map();
+    for (const record of additionals) {
+        if (record.type !== 'A' && record.type !== 'AAAA') continue;
+        const name = normalizeDnsName(record.name);
+        const addresses = knownAddresses.get(name) || [];
+        if (!addresses.includes(record.data)) addresses.push(record.data);
+        knownAddresses.set(name, addresses);
+    }
+    return knownAddresses;
+}
+
 async function resolveAuthoritativeServerIPs(name, serverIp, dnsResponseCache, queryUDP) {
     const responses = await Promise.all(['A', 'AAAA'].map(async type =>
         queryUDP(name, serverIp, dnsResponseCache, type)
@@ -89,8 +101,9 @@ function getMinimizedQnames(domain) {
 async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     const resolveIPs = dependencies.resolveServerIPs || resolveServerIPs;
     const queryUDP = dependencies.queryDirectlyUDP || queryDirectlyUDP;
+    const resolverDependencies = { ...dependencies, dnsResponseCache };
     let currentNs = 'a.root-servers.net';
-    let currentServerIPs = await resolveIPs(currentNs);
+    let currentServerIPs = await resolveIPs(currentNs, resolverDependencies);
     let currentServerNameMap = Object.fromEntries((currentServerIPs || []).map(serverIp => [serverIp, currentNs]));
     let parentNs = '';
     let parentServerIPs = [];
@@ -254,10 +267,11 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         });
         // in-bailiwick glue が無い NS 名は、他の NS 名が glue を持っていても個別に名前解決を試みる。
         const nsNamesNeedingResolution = nextNsNames.filter(nsName => !referralAddressNames.has(nsName));
+        const knownAddresses = getKnownAddresses(delegation.additionals);
         const resolvedIPsByName = nsNamesNeedingResolution.length > 0
             ? await Promise.all(nsNamesNeedingResolution.map(async nsName => ({
                 nsName,
-                ips: await resolveIPs(nsName)
+                ips: await resolveIPs(nsName, { ...resolverDependencies, knownAddresses })
             })))
             : [];
         resolvedIPsByName.forEach(({ nsName, ips }) => {
@@ -351,6 +365,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
 async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, currentDepth = 1, expectedNSList = [], parentGlueMap = {}, dependencies = {}, serverNameMap = {}) {
     const resolveIPs = dependencies.resolveServerIPs || resolveServerIPs;
     const queryUDP = dependencies.queryDirectlyUDP || queryDirectlyUDP;
+    const resolverDependencies = { ...dependencies, dnsResponseCache };
     let results = [];
     if (currentDepth > 10) {
         results.push({
@@ -448,7 +463,9 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
 
             if (currentNSName) {
                 const authoritativeIPs = await resolveAuthoritativeServerIPs(currentNSName, serverIp, dnsResponseCache, queryUDP);
-                const childIPs = authoritativeIPs.length > 0 ? authoritativeIPs : await resolveIPs(currentNSName);
+                const childIPs = authoritativeIPs.length > 0
+                    ? authoritativeIPs
+                    : await resolveIPs(currentNSName, { ...resolverDependencies, knownAddresses: parentGlueMap });
                 const parentGlueIPs = parentGlueMap[currentNSName] || [];
 
                 if (childIPs) {
@@ -502,6 +519,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             let nextGlueMap = {};
             let nextServerIPs = [];
             let nextServerNameMap = {};
+            const knownAddresses = getKnownAddresses(additionals);
 
             for (const ns of nsRecords) {
                 const nsKey = normalizeDnsName(ns.data);
@@ -520,7 +538,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                     });
                 } else {
                     // 本来の意味での Glue が無かった場合に、親が持つ子情報から IP アドレスを取得してリストに登録
-                    const resolvedIPs = await resolveIPs(ns.data);
+                    const resolvedIPs = await resolveIPs(ns.data, { ...resolverDependencies, knownAddresses });
                     if (resolvedIPs) {
                         resolvedIPs.forEach(ip => {
                             nextServerIPs.push(ip);
@@ -585,7 +603,7 @@ app.post('/api/trace', async (req, res) => {
         if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && !zoneApexInfo.parentDelegationUnavailable) {
             const serverList = zoneApexInfo.parentServerIPs.length > 0
                 ? zoneApexInfo.parentServerIPs
-                : await resolveServerIPs('a.root-servers.net');
+                : await resolveServerIPs('a.root-servers.net', { dnsResponseCache });
             const serverNameMap = zoneApexInfo.parentServerNameMap || Object.fromEntries(serverList.map(serverIp => [serverIp, zoneApexInfo.parentNs || 'a.root-servers.net']));
             traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {}, {}, serverNameMap);
         } else if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && zoneApexInfo.parentDelegationUnavailable) {
