@@ -179,6 +179,34 @@ test('委任のない権威応答でゾーン頂点探索を終了する', async
     ]);
 });
 
+test('ゾーン頂点探索は NS 名に一致するゾーン外 ADDITIONAL アドレスで TLD 委任を辿る', async () => {
+    const dependencies = createZoneApexTestDependencies([
+        {
+            qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: {
+                flags: 0,
+                answers: [],
+                authorities: [{ type: 'NS', name: 'com', data: 'l.gtld-servers.net' }],
+                additionals: [{ type: 'A', name: 'l.gtld-servers.net', data: '192.0.2.2' }]
+            }
+        },
+        { qname: 'yodobashi.com', serverIp: '192.0.2.2', qType: 'NS', value: referralResponse('yodobashi.com', 'ns1.yodobashi.com', '192.0.2.3') },
+        {
+            qname: 'yodobashi.com', serverIp: '192.0.2.3', qType: 'NS', value: {
+                flags: 1024,
+                answers: [{ type: 'NS', name: 'yodobashi.com', data: 'ns1.yodobashi.com' }],
+                authorities: []
+            }
+        }
+    ]);
+
+    const result = await getZoneApex('yodobashi.com', new Map(), dependencies);
+
+    assert.equal(result.zoneApex, 'yodobashi.com');
+    assert.equal(result.explorationLogs[0].status, 'FOLLOW_DELEGATION');
+    assert.deepEqual(result.explorationLogs[0].glueIPs, []);
+    assert.equal(result.explorationLogs[1].server, 'l.gtld-servers.net');
+});
+
 test('中間ラベルに委任がない場合でも下位ラベルの委任を探索してゾーン頂点を確定する', async () => {
     const dependencies = createZoneApexTestDependencies([
         { qname: 'jp', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('jp', 'ns.jp', '192.0.2.2') },
@@ -430,6 +458,44 @@ test('委任先の IP がない場合は追跡不能として記録する', asyn
         'DELEGATED',
         'LAME_DELEGATION_NO_NS_IP_ADDRESS'
     ]);
+});
+
+test('委任追跡は NS 名に一致するゾーン外 ADDITIONAL アドレスでも次サーバへ進む', async () => {
+    const result = await traceDomain(
+        'yodobashi.com',
+        ['192.0.2.1'],
+        new Map(),
+        null,
+        1,
+        [],
+        {},
+        createTraceTestDependencies({
+            '192.0.2.1': {
+                flags: 0,
+                answers: [],
+                authorities: [{ type: 'NS', name: 'com', data: 'l.gtld-servers.net' }],
+                additionals: [{ type: 'A', name: 'l.gtld-servers.net', data: '192.0.2.2' }]
+            },
+            '192.0.2.2': {
+                flags: 0,
+                answers: [],
+                authorities: [{ type: 'NS', name: 'yodobashi.com', data: 'ns1.yodobashi.com' }],
+                additionals: [{ type: 'A', name: 'ns1.yodobashi.com', data: '192.0.2.3' }]
+            },
+            '192.0.2.3': {
+                flags: 1024,
+                answers: [{ type: 'NS', name: 'yodobashi.com', data: 'ns1.yodobashi.com' }],
+                authorities: []
+            }
+        }, {
+            'ns1.yodobashi.com': ['192.0.2.3']
+        })
+    );
+
+    assert.deepEqual(result.map(log => log.status), ['DELEGATED', 'DELEGATED', 'SUCCESS']);
+    assert.equal(result[1].server, '192.0.2.2');
+    assert.equal(result[1].serverName, 'l.gtld-servers.net');
+    assert.match(result[0].rfc9471, /ゾーン外 NS の IP アドレス \[l\.gtld-servers\.net\]/);
 });
 
 test('委任先の glue と権威 NS が一致すれば SUCCESS になる', async () => {

@@ -60,6 +60,13 @@ function summarizeRfc9471Referral(nsRecords, additionals, retryFrom = '') {
     return [transportNote, inDomainNote, nonInDomainNote].filter(Boolean).join('\r');
 }
 
+function getReferralAddressRecords(additionals, nsNames) {
+    return additionals.filter(record =>
+        (record.type === 'A' || record.type === 'AAAA') &&
+        nsNames.includes(normalizeDnsName(record.name))
+    );
+}
+
 function getMinimizedQnames(domain) {
     const labels = normalizeDnsName(domain).split('.');
     return labels.map((_, index) => labels.slice(index).join('.')).reverse();
@@ -220,19 +227,19 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         }
 
         const nextNsNames = delegation.nsRecords.map(record => normalizeDnsName(record.data));
-        const inBailiwickGlueNames = new Set(delegation.additionals
-            .filter(record => isInBailiwickGlue(record, nextNsNames, delegation.nextZone))
-            .map(record => normalizeDnsName(record.name)));
-        const glueIPs = delegation.additionals
-            .filter(record => isInBailiwickGlue(record, nextNsNames, delegation.nextZone))
-            .map(record => record.data);
+        const referralAddressRecords = getReferralAddressRecords(delegation.additionals, nextNsNames);
+        const inBailiwickGlueRecords = referralAddressRecords.filter(record => isInBailiwickGlue(record, nextNsNames, delegation.nextZone));
+        const inBailiwickGlueNames = new Set(inBailiwickGlueRecords.map(record => normalizeDnsName(record.name)));
+        const referralAddressNames = new Set(referralAddressRecords.map(record => normalizeDnsName(record.name)));
+        const glueIPs = inBailiwickGlueRecords.map(record => record.data);
+        const referralAddressIPs = referralAddressRecords.map(record => record.data);
         const nextServerNameMap = {};
-        glueIPs.forEach(serverIp => {
+        referralAddressIPs.forEach(serverIp => {
             const glueRecord = delegation.additionals.find(record => record.data === serverIp && nextNsNames.includes(normalizeDnsName(record.name)));
             if (glueRecord && !nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = normalizeDnsName(glueRecord.name);
         });
         // in-bailiwick glue が無い NS 名は、他の NS 名が glue を持っていても個別に名前解決を試みる。
-        const nsNamesNeedingResolution = nextNsNames.filter(nsName => !inBailiwickGlueNames.has(nsName));
+        const nsNamesNeedingResolution = nextNsNames.filter(nsName => !referralAddressNames.has(nsName));
         const resolvedIPsByName = nsNamesNeedingResolution.length > 0
             ? await Promise.all(nsNamesNeedingResolution.map(async nsName => ({
                 nsName,
@@ -244,7 +251,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
                 if (!nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = nsName;
             });
         });
-        const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPsByName.flatMap(({ ips }) => (ips || []).filter(Boolean))])];
+        const nextServerIPs = [...new Set([...referralAddressIPs, ...resolvedIPsByName.flatMap(({ ips }) => (ips || []).filter(Boolean))])];
         const unresolvedNsNames = resolvedIPsByName
             .filter(({ ips }) => !ips || ips.length === 0)
             .map(({ nsName }) => nsName);
@@ -481,12 +488,15 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                 const nsKey = normalizeDnsName(ns.data);
                 nextGlueMap[nsKey] = [];
 
-                const matchedGlues = additionals.filter(record => isInBailiwickGlue(record, [nsKey], delegatedZone));
-                if (matchedGlues.length > 0) {
+                const matchedAddressRecords = getReferralAddressRecords(additionals, [nsKey]);
+                const matchedGlues = matchedAddressRecords.filter(record => isInBailiwickGlue(record, [nsKey], delegatedZone));
+                if (matchedAddressRecords.length > 0) {
                     // 本来の意味での Glueをリストに登録
                     matchedGlues.forEach(g => {
-                        nextServerIPs.push(g.data);
                         nextGlueMap[nsKey].push(g.data);
+                    });
+                    matchedAddressRecords.forEach(g => {
+                        nextServerIPs.push(g.data);
                         if (!nextServerNameMap[g.data]) nextServerNameMap[g.data] = nsKey;
                     });
                 } else {
