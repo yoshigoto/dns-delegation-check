@@ -1,0 +1,30 @@
+#!/bin/sh
+
+# PROVIDE: dns_delegation_check
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="dns_delegation_check"
+rcvar="dns_delegation_check_enable"
+
+load_rc_config "$name"
+
+: ${dns_delegation_check_enable:="NO"}
+: ${dns_delegation_check_chdir:="/usr/local/www/dns-delegation-check"}
+: ${dns_delegation_check_node:="/usr/local/bin/node"}
+: ${dns_delegation_check_script:="server.js"}
+: ${dns_delegation_check_pidfile:="/var/run/${name}.pid"}
+: ${dns_delegation_check_log:="/var/log/${name}.log"}
+
+pidfile="${dns_delegation_check_pidfile}"
+command="/usr/sbin/daemon"
+command_args="-f -p ${pidfile} -o ${dns_delegation_check_log} ${dns_delegation_check_node} ${dns_delegation_check_chdir}/${dns_delegation_check_script}"
+stop_cmd=${name}_stop
+
+dns_delegation_check_stop() {
+	test -e ${pidfile} && kill "$(cat ${pidfile})"
+}
+
+run_rc_command "$1"
