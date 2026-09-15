@@ -3,7 +3,6 @@ import net from 'net';
 import dgram from 'dgram';
 import path from 'path';
 import dnsPacket from 'dns-packet';	// https://github.com/mafintosh/dns-packet
-import promisesDns from 'dns/promises';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -294,23 +293,154 @@ function queryDirectlyUDP(domain, serverIp, dnsResponseCache, qType = 'NS', useE
     });
 }
 
-function resolveDnsRecord(query) {
-    return new Promise((resolve) => {
-        const timer = setTimeout(() => resolve([]), 5000);
-        query()
-            .then(records => resolve(records))
-            .catch(() => resolve([]))
-            .finally(() => clearTimeout(timer));
-    });
+// a.root-servers.net の固定 IP。ここだけは OS/フルサービスリゾルバに頼らずに自己解決を開始するための起点。
+const ROOT_SERVER_BOOTSTRAP_IP = '198.41.0.4';
+const NAMESERVER_IP_CACHE_TTL = 300000; // レコードに TTL が無い場合のフォールバック
+const nameserverIpCache = new Map(); // 正規化ホスト名 -> { ips, expiresAt }
+const inFlightNsSelfResolutions = new Set(); // グルー不足による再帰解決の循環参照検出用
+
+function getCachedNameserverIPs(hostname) {
+    const key = normalizeDnsName(hostname);
+    const cached = nameserverIpCache.get(key);
+    if (!cached) return null;
+    if (cached.expiresAt <= Date.now()) {
+        nameserverIpCache.delete(key);
+        return null;
+    }
+    return cached.ips;
 }
 
-async function resolveServerIPs(nsName) {
-    const [v4, v6] = await Promise.all([
-        resolveDnsRecord(() => promisesDns.resolve4(nsName)),
-        resolveDnsRecord(() => promisesDns.resolve6(nsName))
-    ]);
-    const ips = [...v4, ...v6];
-    return ips.length > 0 ? ips : null;
+function cacheNameserverIPs(hostname, ips, ttlMs = NAMESERVER_IP_CACHE_TTL) {
+    if (!hostname || !ips || ips.length === 0) return;
+    nameserverIpCache.set(normalizeDnsName(hostname), { ips, expiresAt: Date.now() + ttlMs });
+}
+
+// ルートサーバーから委任を辿って name の qType レコードを自己解決する (フルサービスリゾルバのキャッシュを経由しない)。
+async function resolveRecordFromRoot(name, qType, dnsResponseCache, dependencies = {}) {
+    const queryUDP = dependencies.queryDirectlyUDP || queryDirectlyUDP;
+    let currentServerIp = ROOT_SERVER_BOOTSTRAP_IP;
+    let candidateQueue = [];
+
+    for (let depth = 0; depth < 10; depth++) {
+        const res = await queryUDP(name, currentServerIp, dnsResponseCache, qType);
+        if (res.error) {
+            if (candidateQueue.length > 0) {
+                currentServerIp = candidateQueue.shift();
+                continue;
+            }
+            return [];
+        }
+
+        const matchedAnswers = (res.answers || [])
+            .filter(record => record.type === qType && normalizeDnsName(record.name) === normalizeDnsName(name));
+        if (matchedAnswers.length > 0) {
+            return matchedAnswers.map(record => record.data);
+        }
+
+        const AUTHORITATIVE_ANSWER = dnsPacket.AUTHORITATIVE_ANSWER || 1024;
+        const isAuthoritative = (res.flags & AUTHORITATIVE_ANSWER) !== 0;
+        if (isAuthoritative) {
+            return []; // 権威応答だが対象レコードが無い (NODATA/NXDOMAIN)
+        }
+
+        const nsRecords = (res.authorities || []).filter(r => r.type === 'NS');
+        if (nsRecords.length === 0) {
+            if (candidateQueue.length > 0) {
+                currentServerIp = candidateQueue.shift();
+                continue;
+            }
+            return [];
+        }
+
+        const delegatedZone = normalizeDnsName(nsRecords[0].name);
+        const nsNames = nsRecords.map(r => normalizeDnsName(r.data));
+        const glueByNsName = new Map();
+        (res.additionals || [])
+            .filter(record => isInBailiwickGlue(record, nsNames, delegatedZone))
+            .forEach(record => {
+                const key = normalizeDnsName(record.name);
+                if (!glueByNsName.has(key)) glueByNsName.set(key, record.data);
+            });
+
+        // グルーを持つ候補を優先し、無い候補は捨てずにフォールバック用に保持する。
+        const candidates = nsNames
+            .map(nsName => ({ nsName, ip: glueByNsName.get(nsName) || null }))
+            .sort((a, b) => (a.ip ? 0 : 1) - (b.ip ? 0 : 1));
+        const chosen = candidates.shift();
+        candidateQueue = candidates.filter(candidate => candidate.ip).map(candidate => candidate.ip);
+
+        if (chosen.ip) {
+            currentServerIp = chosen.ip;
+            continue;
+        }
+
+        // グルーが無い NS 名は再帰的に自己解決する (循環参照は resolveHostnameIPv4Self 側で検出)
+        const resolvedIp = await resolveHostnameIPv4Self(chosen.nsName, dependencies);
+        if (!resolvedIp) {
+            if (candidateQueue.length > 0) {
+                currentServerIp = candidateQueue.shift();
+                continue;
+            }
+            return [];
+        }
+        currentServerIp = resolvedIp;
+    }
+
+    return [];
+}
+
+// NS 名の IP アドレス解決専用の入り口。グルー不足時の再帰呼び出しで循環参照を検出する。
+async function resolveHostnameIPv4Self(hostname, dependencies = {}) {
+    const normalized = normalizeDnsName(hostname);
+    if (net.isIP(normalized)) return normalized;
+
+    const cached = getCachedNameserverIPs(normalized);
+    if (cached && cached.length > 0) return cached[0];
+
+    if (inFlightNsSelfResolutions.has(normalized)) {
+        return null; // 循環参照 (グルーレコード不足の可能性)
+    }
+
+    inFlightNsSelfResolutions.add(normalized);
+    try {
+        const dnsResponseCache = new Map();
+        const ips = await resolveRecordFromRoot(normalized, 'A', dnsResponseCache, dependencies);
+        if (ips.length > 0) {
+            cacheNameserverIPs(normalized, ips);
+            return ips[0];
+        }
+        return null;
+    } finally {
+        inFlightNsSelfResolutions.delete(normalized);
+    }
+}
+
+// フルサービスリゾルバ (OS のスタブリゾルバ経由) には依存せず、ルートサーバーから自前で NS 名を解決する。
+async function resolveServerIPs(nsName, dependencies = {}) {
+    const normalized = normalizeDnsName(nsName);
+    if (net.isIP(normalized)) return [normalized];
+
+    const cached = getCachedNameserverIPs(normalized);
+    if (cached) return cached;
+
+    if (inFlightNsSelfResolutions.has(normalized)) {
+        return null; // 循環参照 (グルーレコード不足の可能性)
+    }
+
+    inFlightNsSelfResolutions.add(normalized);
+    try {
+        const dnsResponseCache = new Map();
+        const [v4, v6] = await Promise.all([
+            resolveRecordFromRoot(normalized, 'A', dnsResponseCache, dependencies),
+            resolveRecordFromRoot(normalized, 'AAAA', dnsResponseCache, dependencies)
+        ]);
+        const ips = [...v4, ...v6];
+        if (ips.length === 0) return null;
+        cacheNameserverIPs(normalized, ips);
+        return ips;
+    } finally {
+        inFlightNsSelfResolutions.delete(normalized);
+    }
 }
 
 function getMinimizedQnames(domain) {
