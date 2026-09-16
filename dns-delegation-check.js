@@ -79,6 +79,13 @@ function getKnownAddresses(additionals) {
     return knownAddresses;
 }
 
+function getAddressesForName(addressRecords, nsName) {
+    const normalized = normalizeDnsName(nsName);
+    return addressRecords
+        .filter(record => normalizeDnsName(record.name) === normalized)
+        .map(record => record.data);
+}
+
 async function resolveAuthoritativeServerIPs(name, serverIp, dnsResponseCache, queryUDP) {
     const responses = await Promise.all(['A', 'AAAA'].map(async type =>
         queryUDP(name, serverIp, dnsResponseCache, type)
@@ -257,21 +264,18 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         const referralAddressRecords = getReferralAddressRecords(delegation.additionals, nextNsNames);
         const inBailiwickGlueRecords = referralAddressRecords.filter(record => isInBailiwickGlue(record, nextNsNames, delegation.nextZone));
         const inBailiwickGlueNames = new Set(inBailiwickGlueRecords.map(record => normalizeDnsName(record.name)));
-        const referralAddressNames = new Set(referralAddressRecords.map(record => normalizeDnsName(record.name)));
         const glueIPs = inBailiwickGlueRecords.map(record => record.data);
-        const referralAddressIPs = referralAddressRecords.map(record => record.data);
         const nextServerNameMap = {};
-        referralAddressIPs.forEach(serverIp => {
-            const glueRecord = delegation.additionals.find(record => record.data === serverIp && nextNsNames.includes(normalizeDnsName(record.name)));
+        glueIPs.forEach(serverIp => {
+            const glueRecord = inBailiwickGlueRecords.find(record => record.data === serverIp);
             if (glueRecord && !nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = normalizeDnsName(glueRecord.name);
         });
         // in-bailiwick glue が無い NS 名は、他の NS 名が glue を持っていても個別に名前解決を試みる。
-        const nsNamesNeedingResolution = nextNsNames.filter(nsName => !referralAddressNames.has(nsName));
-        const knownAddresses = getKnownAddresses(delegation.additionals);
+        const nsNamesNeedingResolution = nextNsNames.filter(nsName => !inBailiwickGlueNames.has(nsName));
         const resolvedIPsByName = nsNamesNeedingResolution.length > 0
             ? await Promise.all(nsNamesNeedingResolution.map(async nsName => ({
                 nsName,
-                ips: await resolveIPs(nsName, { ...resolverDependencies, knownAddresses })
+                ips: await resolveIPs(nsName, resolverDependencies)
             })))
             : [];
         resolvedIPsByName.forEach(({ nsName, ips }) => {
@@ -279,9 +283,16 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
                 if (!nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = nsName;
             });
         });
-        const nextServerIPs = [...new Set([...referralAddressIPs, ...resolvedIPsByName.flatMap(({ ips }) => (ips || []).filter(Boolean))])];
-        const unresolvedNsNames = resolvedIPsByName
+        const fallbackReferralIPs = resolvedIPsByName
             .filter(({ ips }) => !ips || ips.length === 0)
+            .flatMap(({ nsName }) => getAddressesForName(referralAddressRecords, nsName));
+        fallbackReferralIPs.forEach(serverIp => {
+            const referralRecord = referralAddressRecords.find(record => record.data === serverIp && nextNsNames.includes(normalizeDnsName(record.name)));
+            if (referralRecord && !nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = normalizeDnsName(referralRecord.name);
+        });
+        const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPsByName.flatMap(({ ips }) => (ips || []).filter(Boolean)), ...fallbackReferralIPs])];
+        const unresolvedNsNames = resolvedIPsByName
+            .filter(({ nsName, ips }) => (!ips || ips.length === 0) && getAddressesForName(referralAddressRecords, nsName).length === 0)
             .map(({ nsName }) => nsName);
 
         const delegationLog = pushExplorationLog('FOLLOW_DELEGATION', `${qname} に対して ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
@@ -519,7 +530,6 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             let nextGlueMap = {};
             let nextServerIPs = [];
             let nextServerNameMap = {};
-            const knownAddresses = getKnownAddresses(additionals);
 
             for (const ns of nsRecords) {
                 const nsKey = normalizeDnsName(ns.data);
@@ -527,24 +537,22 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
 
                 const matchedAddressRecords = getReferralAddressRecords(additionals, [nsKey]);
                 const matchedGlues = matchedAddressRecords.filter(record => isInBailiwickGlue(record, [nsKey], delegatedZone));
-                if (matchedAddressRecords.length > 0) {
-                    // 本来の意味での Glueをリストに登録
-                    matchedGlues.forEach(g => {
-                        nextGlueMap[nsKey].push(g.data);
+                matchedGlues.forEach(g => {
+                    nextGlueMap[nsKey].push(g.data);
+                    nextServerIPs.push(g.data);
+                    if (!nextServerNameMap[g.data]) nextServerNameMap[g.data] = nsKey;
+                });
+
+                if (matchedGlues.length === 0) {
+                    const resolvedIPs = await resolveIPs(ns.data, resolverDependencies);
+                    const nextIPs = resolvedIPs && resolvedIPs.length > 0
+                        ? resolvedIPs
+                        : matchedAddressRecords.map(record => record.data);
+
+                    nextIPs.forEach(ip => {
+                        nextServerIPs.push(ip);
+                        if (!nextServerNameMap[ip]) nextServerNameMap[ip] = nsKey;
                     });
-                    matchedAddressRecords.forEach(g => {
-                        nextServerIPs.push(g.data);
-                        if (!nextServerNameMap[g.data]) nextServerNameMap[g.data] = nsKey;
-                    });
-                } else {
-                    // 本来の意味での Glue が無かった場合に、親が持つ子情報から IP アドレスを取得してリストに登録
-                    const resolvedIPs = await resolveIPs(ns.data, { ...resolverDependencies, knownAddresses });
-                    if (resolvedIPs) {
-                        resolvedIPs.forEach(ip => {
-                            nextServerIPs.push(ip);
-                            if (!nextServerNameMap[ip]) nextServerNameMap[ip] = nsKey;
-                        });
-                    }
                 }
             }
 

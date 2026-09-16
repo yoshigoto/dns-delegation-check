@@ -527,6 +527,37 @@ test('委任追跡は NS 名に一致するゾーン外 ADDITIONAL アドレス�
     assert.match(result[0].rfc9471, /ゾーン外 NS の IP アドレス \[l\.gtld-servers\.net\]/);
 });
 
+test('委任追跡はゾーン外 ADDITIONAL アドレスより NS 名の名前解決結果を優先する', async () => {
+    const result = await traceDomain(
+        'child.example.com',
+        ['192.0.2.1'],
+        new Map(),
+        null,
+        1,
+        [],
+        {},
+        createTraceTestDependencies({
+            '192.0.2.1': {
+                flags: 0,
+                answers: [],
+                authorities: [{ type: 'NS', name: 'child.example.com', data: 'ns1.example.net' }],
+                additionals: [{ type: 'A', name: 'ns1.example.net', data: '192.0.2.2' }]
+            },
+            '192.0.2.3': {
+                flags: 1024,
+                answers: [{ type: 'NS', name: 'child.example.com', data: 'ns1.example.net' }],
+                authorities: []
+            }
+        }, {
+            'ns1.example.net': ['192.0.2.3']
+        })
+    );
+
+    assert.deepEqual(result.map(log => log.status), ['DELEGATED', 'SUCCESS']);
+    assert.equal(result[1].server, '192.0.2.3');
+    assert.equal(result[1].serverName, 'ns1.example.net');
+});
+
 test('委任先の glue と権威 NS が一致すれば SUCCESS になる', async () => {
     const result = await traceDomain(
         'child.example.com',
