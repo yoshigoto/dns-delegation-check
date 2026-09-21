@@ -18,10 +18,12 @@ load_rc_config "$name"
 : ${dns_delegation_check_pidfile:="/var/run/${name}.pid"}
 : ${dns_delegation_check_log:="/var/log/${name}.log"}
 
+user_name="www"
 pidfile="${dns_delegation_check_pidfile}"
+logfile="${dns_delegation_check_log}"
 command="/usr/sbin/daemon"
-command_args="-f -p ${pidfile} -o ${dns_delegation_check_log} ${dns_delegation_check_node} ${dns_delegation_check_chdir}/${dns_delegation_check_script}"
-stop_cmd=${name}_stop
+command_args="-f -p ${pidfile} -u ${user_name} -o ${logfile} ${dns_delegation_check_node} ${dns_delegation_check_script}"
+stop_cmd="${name}_stop"
 
 dns_delegation_check_stop() {
 	test -e ${pidfile} && kill "$(cat ${pidfile})"
