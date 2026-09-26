@@ -54,7 +54,7 @@ function summarizeRfc9471Referral(nsRecords, additionals, retryFrom = '') {
             ? `in-domain glue: [${inDomainGlueNames.join(', ')}]`
             : `ADDITIONAL SECTION に存在しない in-domain NS [${missingInDomainGlueNames.join(', ')}] は、親ゾーンで利用可能な glue が存在するかは応答だけでは判定できません。`;
     const nonInDomainNote = nonInDomainAddressNames.length > 0
-        ? `ADDITIONAL SECTION に存在するゾーン外 NS の IP アドレス [${nonInDomainAddressNames.join(', ')}] は sibling glue である可能性がありますが、このツールでは glue として採用しません。`
+        ? `ADDITIONAL SECTION に存在するゾーン外 NS の IP アドレス [${nonInDomainAddressNames.join(', ')}] は sibling glue である可能性があります。`
         : '';
 
     return [transportNote, inDomainNote, nonInDomainNote].filter(Boolean).join('\r');
