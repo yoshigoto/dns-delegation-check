@@ -34,17 +34,14 @@ function normalizeUserDomain(value) {
     return normalized;
 }
 
-function summarizeRfc9471Referral(nsRecords, additionals, retryFrom = '') {
+function summarizeRfc9471Referral(nsRecords, additionals, retryFrom = '', parentZone) {
     const delegatedZone = normalizeDnsName(nsRecords[0]?.name);
     const nsNames = nsRecords.map(record => normalizeDnsName(record.data));
+    const { inDomainGlueRecords, siblingGlueRecords, unrelatedAddressRecords } = classifyReferralAddressRecords(additionals, nsNames, delegatedZone, parentZone);
     const inDomainNs = nsNames.filter(nsName => isSubdomainOrEqual(nsName, delegatedZone));
-    const inDomainGlueNames = [...new Set(additionals
-        .filter(record => isInBailiwickGlue(record, nsNames, delegatedZone))
+    const inDomainGlueNames = [...new Set(inDomainGlueRecords
         .map(record => normalizeDnsName(record.name)))];
     const missingInDomainGlueNames = inDomainNs.filter(nsName => !inDomainGlueNames.includes(nsName));
-    const nonInDomainAddressNames = [...new Set(additionals
-        .filter(record => (record.type === 'A' || record.type === 'AAAA') && nsNames.includes(normalizeDnsName(record.name)) && !isSubdomainOrEqual(record.name, delegatedZone))
-        .map(record => normalizeDnsName(record.name)))];
     const transportNote = retryFrom === 'udp-truncated'
         ? 'UDP 応答は TC=1 のため TCP で再取得しました。'
         : 'UDP 応答は TC=0 でした。';
@@ -53,18 +50,38 @@ function summarizeRfc9471Referral(nsRecords, additionals, retryFrom = '') {
         : missingInDomainGlueNames.length === 0
             ? `in-domain glue: [${inDomainGlueNames.join(', ')}]`
             : `ADDITIONAL SECTION に存在しない in-domain NS [${missingInDomainGlueNames.join(', ')}] は、親ゾーンで利用可能な glue が存在するかは応答だけでは判定できません。`;
-    const nonInDomainNote = nonInDomainAddressNames.length > 0
-        ? `ADDITIONAL SECTION に存在するゾーン外 NS の IP アドレス [${nonInDomainAddressNames.join(', ')}] は sibling glue である可能性があります。`
+    const siblingNote = siblingGlueRecords.length > 0
+        ? `ADDITIONAL SECTION の sibling glue [${siblingGlueRecords.map(record => `${normalizeDnsName(record.name)}: ${record.data}`).join(', ')}] は候補として扱います。`
+        : '';
+    const unrelatedNote = unrelatedAddressRecords.length > 0
+        ? `RFC 9499 で Unrelated と分類される ADDITIONAL SECTION のアドレス [${unrelatedAddressRecords.map(record => `${normalizeDnsName(record.name)}: ${record.data}`).join(', ')}] は、偽装アドレスを使わせる攻撃への対策として採用しません。`
         : '';
 
-    return [transportNote, inDomainNote, nonInDomainNote].filter(Boolean).join('\r');
+    return [transportNote, inDomainNote, siblingNote, unrelatedNote].filter(Boolean).join('\r');
 }
 
-function getReferralAddressRecords(additionals, nsNames) {
-    return additionals.filter(record =>
+function classifyReferralAddressRecords(additionals, nsNames, delegatedZone, parentZone = normalizeDnsName(delegatedZone).split('.').slice(1).join('.')) {
+    const addressRecords = additionals.filter(record =>
         (record.type === 'A' || record.type === 'AAAA') &&
         nsNames.includes(normalizeDnsName(record.name))
     );
+    const inDomainGlueRecords = addressRecords.filter(record =>
+        isInBailiwickGlue(record, nsNames, delegatedZone)
+    );
+    const siblingGlueRecords = addressRecords.filter(record =>
+        !inDomainGlueRecords.includes(record) &&
+        (!parentZone || isSubdomainOrEqual(record.name, parentZone))
+    );
+    const unrelatedAddressRecords = addressRecords.filter(record =>
+        !inDomainGlueRecords.includes(record) && !siblingGlueRecords.includes(record)
+    );
+
+    return { inDomainGlueRecords, siblingGlueRecords, unrelatedAddressRecords };
+}
+
+function getReferralAddressRecords(additionals, nsNames, delegatedZone, parentZone) {
+    const { inDomainGlueRecords, siblingGlueRecords } = classifyReferralAddressRecords(additionals, nsNames, delegatedZone, parentZone);
+    return [...inDomainGlueRecords, ...siblingGlueRecords];
 }
 
 function getKnownAddresses(additionals) {
@@ -110,6 +127,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     const queryUDP = dependencies.queryDirectlyUDP || queryDirectlyUDP;
     const resolverDependencies = { ...dependencies, dnsResponseCache };
     let currentNs = 'a.root-servers.net';
+    let currentZone = '';
     let currentServerIPs = await resolveIPs(currentNs, resolverDependencies);
     let currentServerNameMap = Object.fromEntries((currentServerIPs || []).map(serverIp => [serverIp, currentNs]));
     let parentNs = '';
@@ -261,7 +279,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         }
 
         const nextNsNames = delegation.nsRecords.map(record => normalizeDnsName(record.data));
-        const referralAddressRecords = getReferralAddressRecords(delegation.additionals, nextNsNames);
+        const referralAddressRecords = getReferralAddressRecords(delegation.additionals, nextNsNames, delegation.nextZone, currentZone);
         const inBailiwickGlueRecords = referralAddressRecords.filter(record => isInBailiwickGlue(record, nextNsNames, delegation.nextZone));
         const inBailiwickGlueNames = new Set(inBailiwickGlueRecords.map(record => normalizeDnsName(record.name)));
         const glueIPs = inBailiwickGlueRecords.map(record => record.data);
@@ -305,7 +323,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             nextServer: nextNsNames,
             glueIPs,
             fallbackAddressNotes,
-            rfc9471: summarizeRfc9471Referral(delegation.nsRecords, delegation.additionals),
+            rfc9471: summarizeRfc9471Referral(delegation.nsRecords, delegation.additionals, '', currentZone),
             nsResolutionWarning: unresolvedNsNames.length > 0 ? { names: unresolvedNsNames } : null
         });
 
@@ -327,6 +345,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         currentNs = nextNsNames.join(', ');
         currentServerIPs = nextServerIPs;
         currentServerNameMap = nextServerNameMap;
+        currentZone = delegation.nextZone;
         lastDelegatedZone = delegation.nextZone;
         lastDelegatedOrder = qnameIndex;
         qnameIndex++;
@@ -379,7 +398,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     };
 }
 
-async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, currentDepth = 1, expectedNSList = [], parentGlueMap = {}, dependencies = {}, serverNameMap = {}) {
+async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, currentDepth = 1, expectedNSList = [], parentGlueMap = {}, dependencies = {}, serverNameMap = {}, currentZone = '') {
     const resolveIPs = dependencies.resolveServerIPs || resolveServerIPs;
     const queryUDP = dependencies.queryDirectlyUDP || queryDirectlyUDP;
     const resolverDependencies = { ...dependencies, dnsResponseCache };
@@ -531,7 +550,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
 
             const currentNSNames = nsRecords.map(r => normalizeDnsName(r.data));
             const delegatedZone = normalizeDnsName(nsRecords[0].name);
-            logEntry.rfc9471 = summarizeRfc9471Referral(nsRecords, additionals, res.retryFrom);
+            logEntry.rfc9471 = summarizeRfc9471Referral(nsRecords, additionals, res.retryFrom, currentZone);
 
             let nextGlueMap = {};
             let nextServerIPs = [];
@@ -542,7 +561,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                 const nsKey = normalizeDnsName(ns.data);
                 nextGlueMap[nsKey] = [];
 
-                const matchedAddressRecords = getReferralAddressRecords(additionals, [nsKey]);
+                const matchedAddressRecords = getReferralAddressRecords(additionals, [nsKey], delegatedZone, currentZone);
                 const matchedGlues = matchedAddressRecords.filter(record => isInBailiwickGlue(record, [nsKey], delegatedZone));
                 matchedGlues.forEach(g => {
                     nextGlueMap[nsKey].push(g.data);
@@ -570,7 +589,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             nextServerIPs = [...new Set(nextServerIPs)];
 
             if (nextServerIPs.length > 0) {
-                const childResults = await traceDomain(domain, nextServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap, dependencies, nextServerNameMap);
+                const childResults = await traceDomain(domain, nextServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap, dependencies, nextServerNameMap, delegatedZone);
                 results = results.concat(childResults);
             } else {
                 results.push({

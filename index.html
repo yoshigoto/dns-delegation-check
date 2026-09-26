@@ -670,8 +670,9 @@ function renderLogTree(logData, target) {
 
             if (node.rfc9471) {
                 const rfc9471Div = document.createElement('div');
-                rfc9471Div.className = 'rfc9471-box match-success';
-                rfc9471Div.innerText = `RFC 9471 確認結果:\r${node.rfc9471}`;
+                const classification = node.rfc9471.includes('採用しません') ? 'match-fail' : 'match-success';
+                rfc9471Div.className = `rfc9471-box ${classification}`;
+                rfc9471Div.innerText = `RFC 9471 / RFC 9499 確認結果:\r${node.rfc9471}`;
                 itemBlock.appendChild(rfc9471Div);
             }
 

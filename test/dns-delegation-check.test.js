@@ -60,18 +60,21 @@ test('最小化した問い合わせ名をルートから順に作る', () => {
 test('RFC 9471 要約で in-domain glue の不足とゾーン外アドレスを示す', () => {
     const nsRecords = [
         { type: 'NS', name: 'child.example.com', data: 'ns1.child.example.com' },
-        { type: 'NS', name: 'child.example.com', data: 'ns2.external.example.net' }
+        { type: 'NS', name: 'child.example.com', data: 'ns2.external.example.net' },
+        { type: 'NS', name: 'child.example.com', data: 'ns3.sibling.example.com' }
     ];
     const additionals = [
         { type: 'A', name: 'ns1.child.example.com', data: '192.0.2.10' },
-        { type: 'A', name: 'ns2.external.example.net', data: '192.0.2.11' }
+        { type: 'A', name: 'ns2.external.example.net', data: '192.0.2.11' },
+        { type: 'A', name: 'ns3.sibling.example.com', data: '192.0.2.12' }
     ];
 
     const summary = summarizeRfc9471Referral(nsRecords, additionals, 'udp-truncated');
 
     assert.match(summary, /TCP で再取得しました/);
     assert.match(summary, /in-domain glue: \[ns1\.child\.example\.com\]/);
-    assert.match(summary, /ゾーン外 NS の IP アドレス \[ns2\.external\.example\.net\] は sibling glue である可能性があります/);
+    assert.match(summary, /sibling glue \[ns3\.sibling\.example\.com: 192\.0\.2\.12\] は候補として扱います/);
+    assert.match(summary, /RFC 9499 で Unrelated.*ns2\.external\.example\.net: 192\.0\.2\.11.*採用しません/);
 });
 
 test('ゾーン頂点探索は CNAME と DNAME で終了ログを記録する', async (t) => {
@@ -207,6 +210,31 @@ test('ゾーン頂点探索は NS 名に一致するゾーン外 ADDITIONAL ア�
     assert.deepEqual(result.explorationLogs[0].fallbackAddressNotes, ['l.gtld-servers.net: [192.0.2.2]']);
     assert.doesNotMatch(result.explorationLogs[0].detail, /ADDITIONAL SECTION/);
     assert.equal(result.explorationLogs[1].server, 'l.gtld-servers.net');
+});
+
+test('ゾーン頂点探索は Unrelated な ADDITIONAL アドレスを採用しない', async () => {
+    const dependencies = createZoneApexTestDependencies([
+        { qname: 'jp', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('jp', 'ns.jp', '192.0.2.2') },
+        {
+            qname: 'example.jp', serverIp: '192.0.2.2', qType: 'NS', value: {
+                flags: 0,
+                answers: [],
+                authorities: [{ type: 'NS', name: 'example.jp', data: 'ns1.example.com' }],
+                additionals: [{ type: 'A', name: 'ns1.example.com', data: '192.0.2.66' }]
+            }
+        }
+    ]);
+
+    const result = await getZoneApex('example.jp', new Map(), dependencies);
+
+    assert.deepEqual(result.explorationLogs.map(log => log.status), [
+        'FOLLOW_DELEGATION',
+        'FOLLOW_DELEGATION',
+        'LAME_DELEGATION_NO_NS_IP_ADDRESS',
+        'ZONE_APEX_FOUND'
+    ]);
+    assert.deepEqual(result.explorationLogs[1].glueIPs, []);
+    assert.match(result.explorationLogs[1].rfc9471, /Unrelated.*192\.0\.2\.66.*採用しません/);
 });
 
 test('中間ラベルに委任がない場合でも下位ラベルの委任を探索してゾーン頂点を確定する', async () => {
@@ -526,9 +554,44 @@ test('委任追跡は NS 名に一致するゾーン外 ADDITIONAL アドレス�
     assert.deepEqual(result.map(log => log.status), ['DELEGATED', 'DELEGATED', 'SUCCESS']);
     assert.equal(result[1].server, '192.0.2.2');
     assert.equal(result[1].serverName, 'l.gtld-servers.net');
-    assert.match(result[0].rfc9471, /ゾーン外 NS の IP アドレス \[l\.gtld-servers\.net\]/);
+    assert.match(result[0].rfc9471, /sibling glue \[l\.gtld-servers\.net: 192\.0\.2\.2\]/);
     assert.deepEqual(result[0].fallbackAddressNotes, ['l.gtld-servers.net: [192.0.2.2]']);
     assert.doesNotMatch(result[0].detail, /ADDITIONAL SECTION/);
+});
+
+test('委任追跡は Unrelated な ADDITIONAL アドレスを採用しない', async () => {
+    const result = await traceDomain(
+        'example.jp',
+        ['192.0.2.1'],
+        new Map(),
+        null,
+        1,
+        [],
+        {},
+        {
+            resolveServerIPs: async () => null,
+            queryDirectlyUDP: async (domain, serverIp) => {
+                if (serverIp === '192.0.2.1') {
+                    return {
+                        flags: 0,
+                        answers: [],
+                        authorities: [{ type: 'NS', name: 'jp', data: 'ns.jp' }],
+                        additionals: [{ type: 'A', name: 'ns.jp', data: '192.0.2.2' }]
+                    };
+                }
+                assert.equal(serverIp, '192.0.2.2', 'Unrelated な ADDITIONAL の IP に問い合わせてはいけません');
+                return {
+                    flags: 0,
+                    answers: [],
+                    authorities: [{ type: 'NS', name: 'example.jp', data: 'ns1.example.com' }],
+                    additionals: [{ type: 'A', name: 'ns1.example.com', data: '192.0.2.66' }]
+                };
+            }
+        }
+    );
+
+    assert.deepEqual(result.map(log => log.status), ['DELEGATED', 'DELEGATED', 'LAME_DELEGATION_NO_NS_IP_ADDRESS']);
+    assert.match(result[1].rfc9471, /Unrelated.*192\.0\.2\.66.*採用しません/);
 });
 
 test('委任追跡はゾーン外 ADDITIONAL アドレスより NS 名の名前解決結果を優先する', async () => {

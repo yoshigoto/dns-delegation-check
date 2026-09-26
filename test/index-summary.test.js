@@ -128,6 +128,7 @@ test('ADDITIONAL の IP 採用を委任ログの専用ボックスにだけ表�
         {
             server: '192.0.2.3', parent: null, status: 'DELEGATED',
             detail: 'AUTHORITY SECTION に NS レコード。',
+            rfc9471: 'RFC 9499 で Unrelated と分類されるアドレスは採用しません。',
             fallbackAddressNotes: []
         }
     ], target);
@@ -143,6 +144,8 @@ test('ADDITIONAL の IP 採用を委任ログの専用ボックスにだけ表�
     assert.equal(boxes.length, 1);
     assert.match(boxes[0].innerText, /IP アドレスの採用元:\rNS 名の名前解決に失敗したため、親の ADDITIONAL SECTION から採用しました。\rns\.example\.net: \[192\.0\.2\.2\]/);
     assert.equal(elements.filter(element => element.className === 'rfc9471-box match-success').length, 1);
+    assert.equal(elements.filter(element => element.className === 'rfc9471-box match-fail').length, 1);
+    assert.match(elements.find(element => element.className === 'rfc9471-box match-fail').innerText, /RFC 9471 \/ RFC 9499 確認結果/);
     assert.ok(elements.filter(element => element.className === 'server-detail').every(element => !element.textContent.includes('ADDITIONAL SECTION')));
 });
 
