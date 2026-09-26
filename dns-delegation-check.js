@@ -286,6 +286,11 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         const fallbackReferralIPs = resolvedIPsByName
             .filter(({ ips }) => !ips || ips.length === 0)
             .flatMap(({ nsName }) => getAddressesForName(referralAddressRecords, nsName));
+        const fallbackAddressNotes = resolvedIPsByName
+            .filter(({ ips }) => !ips || ips.length === 0)
+            .map(({ nsName }) => ({ nsName, addresses: getAddressesForName(referralAddressRecords, nsName) }))
+            .filter(({ addresses }) => addresses.length > 0)
+            .map(({ nsName, addresses }) => `${nsName}: [${addresses.join(', ')}]`);
         fallbackReferralIPs.forEach(serverIp => {
             const referralRecord = referralAddressRecords.find(record => record.data === serverIp && nextNsNames.includes(normalizeDnsName(record.name)));
             if (referralRecord && !nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = normalizeDnsName(referralRecord.name);
@@ -299,6 +304,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             parentLogId: currentParentLogId,
             nextServer: nextNsNames,
             glueIPs,
+            fallbackAddressNotes,
             rfc9471: summarizeRfc9471Referral(delegation.nsRecords, delegation.additionals),
             nsResolutionWarning: unresolvedNsNames.length > 0 ? { names: unresolvedNsNames } : null
         });
@@ -530,6 +536,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             let nextGlueMap = {};
             let nextServerIPs = [];
             let nextServerNameMap = {};
+            const fallbackAddressNotes = [];
 
             for (const ns of nsRecords) {
                 const nsKey = normalizeDnsName(ns.data);
@@ -548,6 +555,9 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                     const nextIPs = resolvedIPs && resolvedIPs.length > 0
                         ? resolvedIPs
                         : matchedAddressRecords.map(record => record.data);
+                    if ((!resolvedIPs || resolvedIPs.length === 0) && nextIPs.length > 0) {
+                        fallbackAddressNotes.push(`${nsKey}: [${nextIPs.join(', ')}]`);
+                    }
 
                     nextIPs.forEach(ip => {
                         nextServerIPs.push(ip);
@@ -556,6 +566,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                 }
             }
 
+            logEntry.fallbackAddressNotes = fallbackAddressNotes;
             nextServerIPs = [...new Set(nextServerIPs)];
 
             if (nextServerIPs.length > 0) {

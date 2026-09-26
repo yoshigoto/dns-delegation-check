@@ -265,13 +265,18 @@
             text-overflow: clip;
         }
 
-        .ns-match-box, .glue-match-box, .rfc9471-box {
+        .ns-match-box, .glue-match-box, .rfc9471-box, .fallback-address-box {
             font-size: 12px;
             margin-top: 4px;
             margin-left: 35px; 
             padding: 6px 12px;
             border-radius: 4px;
             display: inline-block;
+        }
+        .fallback-address-box {
+            background-color: #e7f3f8;
+            color: #22546a;
+            border: 1px solid #b6d9e7;
         }
         .match-success {
             background-color: #e8f5e9;
@@ -668,6 +673,13 @@ function renderLogTree(logData, target) {
                 rfc9471Div.className = 'rfc9471-box match-success';
                 rfc9471Div.innerText = `RFC 9471 確認結果:\r${node.rfc9471}`;
                 itemBlock.appendChild(rfc9471Div);
+            }
+
+            if (node.fallbackAddressNotes && node.fallbackAddressNotes.length > 0) {
+                const fallbackDiv = document.createElement('div');
+                fallbackDiv.className = 'fallback-address-box';
+                fallbackDiv.innerText = `IP アドレスの採用元:\rNS 名の名前解決に失敗したため、親の ADDITIONAL SECTION から採用しました。\r${node.fallbackAddressNotes.join('\r')}`;
+                itemBlock.appendChild(fallbackDiv);
             }
 
             if (node.nsMatch) {

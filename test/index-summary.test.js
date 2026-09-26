@@ -79,7 +79,8 @@ function loadPageWithSearch(search = '', fetchImpl) {
         domainInput,
         summaryPanel,
         resultContainer,
-        startTrace: context.startTrace
+        startTrace: context.startTrace,
+        renderLogTree: context.renderLogTree
     };
 }
 
@@ -112,6 +113,37 @@ test('domain クエリがあると自動で解析を開始する', async () => {
 
     await fetchPromise;
     assert.equal(fetchCalled, true);
+});
+
+test('ADDITIONAL の IP 採用を委任ログの専用ボックスにだけ表示する', () => {
+    const { renderLogTree } = loadPageWithSearch();
+    const target = createElement();
+    renderLogTree([
+        {
+            server: '192.0.2.1', parent: null, status: 'DELEGATED',
+            detail: 'AUTHORITY SECTION に NS レコード。',
+            rfc9471: 'UDP 応答は TC=0 でした。',
+            fallbackAddressNotes: ['ns.example.net: [192.0.2.2]']
+        },
+        {
+            server: '192.0.2.3', parent: null, status: 'DELEGATED',
+            detail: 'AUTHORITY SECTION に NS レコード。',
+            fallbackAddressNotes: []
+        }
+    ], target);
+
+    const elements = [];
+    function visit(element) {
+        elements.push(element);
+        element.children.forEach(visit);
+    }
+    visit(target);
+
+    const boxes = elements.filter(element => element.className === 'fallback-address-box');
+    assert.equal(boxes.length, 1);
+    assert.match(boxes[0].innerText, /IP アドレスの採用元:\rNS 名の名前解決に失敗したため、親の ADDITIONAL SECTION から採用しました。\rns\.example\.net: \[192\.0\.2\.2\]/);
+    assert.equal(elements.filter(element => element.className === 'rfc9471-box match-success').length, 1);
+    assert.ok(elements.filter(element => element.className === 'server-detail').every(element => !element.textContent.includes('ADDITIONAL SECTION')));
 });
 
 test('verdictがゾーン頂点探索と委任追跡の結果を概要表示する', () => {

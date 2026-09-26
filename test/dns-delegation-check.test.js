@@ -71,7 +71,7 @@ test('RFC 9471 要約で in-domain glue の不足とゾーン外アドレスを�
 
     assert.match(summary, /TCP で再取得しました/);
     assert.match(summary, /in-domain glue: \[ns1\.child\.example\.com\]/);
-    assert.match(summary, /ゾーン外 NS の IP アドレス \[ns2\.external\.example\.net\] は sibling glue である可能性がありますが、このツールでは glue として採用しません/);
+    assert.match(summary, /ゾーン外 NS の IP アドレス \[ns2\.external\.example\.net\] は sibling glue である可能性があります/);
 });
 
 test('ゾーン頂点探索は CNAME と DNAME で終了ログを記録する', async (t) => {
@@ -204,6 +204,8 @@ test('ゾーン頂点探索は NS 名に一致するゾーン外 ADDITIONAL ア�
     assert.equal(result.zoneApex, 'yodobashi.com');
     assert.equal(result.explorationLogs[0].status, 'FOLLOW_DELEGATION');
     assert.deepEqual(result.explorationLogs[0].glueIPs, []);
+    assert.deepEqual(result.explorationLogs[0].fallbackAddressNotes, ['l.gtld-servers.net: [192.0.2.2]']);
+    assert.doesNotMatch(result.explorationLogs[0].detail, /ADDITIONAL SECTION/);
     assert.equal(result.explorationLogs[1].server, 'l.gtld-servers.net');
 });
 
@@ -525,6 +527,8 @@ test('委任追跡は NS 名に一致するゾーン外 ADDITIONAL アドレス�
     assert.equal(result[1].server, '192.0.2.2');
     assert.equal(result[1].serverName, 'l.gtld-servers.net');
     assert.match(result[0].rfc9471, /ゾーン外 NS の IP アドレス \[l\.gtld-servers\.net\]/);
+    assert.deepEqual(result[0].fallbackAddressNotes, ['l.gtld-servers.net: [192.0.2.2]']);
+    assert.doesNotMatch(result[0].detail, /ADDITIONAL SECTION/);
 });
 
 test('委任追跡はゾーン外 ADDITIONAL アドレスより NS 名の名前解決結果を優先する', async () => {
@@ -556,6 +560,7 @@ test('委任追跡はゾーン外 ADDITIONAL アドレスより NS 名の名前�
     assert.deepEqual(result.map(log => log.status), ['DELEGATED', 'SUCCESS']);
     assert.equal(result[1].server, '192.0.2.3');
     assert.equal(result[1].serverName, 'ns1.example.net');
+    assert.deepEqual(result[0].fallbackAddressNotes, []);
 });
 
 test('委任先の glue と権威 NS が一致すれば SUCCESS になる', async () => {
@@ -589,6 +594,7 @@ test('委任先の glue と権威 NS が一致すれば SUCCESS になる', asyn
     assert.equal(result[1].serverName, 'ns1.child.example.com');
     assert.equal(result[1].nsMatch.success, true);
     assert.equal(result[1].glueMatch.success, true);
+    assert.deepEqual(result[0].fallbackAddressNotes, []);
 });
 
 test('Glue 比較では子ゾーン権威サーバーから得た NS の IP を再帰的名前解決より優先する', async () => {
