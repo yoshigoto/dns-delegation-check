@@ -230,9 +230,10 @@ test('ゾーン頂点探索は Unrelated な ADDITIONAL アドレスを採用し
     assert.deepEqual(result.explorationLogs.map(log => log.status), [
         'FOLLOW_DELEGATION',
         'FOLLOW_DELEGATION',
-        'LAME_DELEGATION_NO_NS_IP_ADDRESS',
-        'ZONE_APEX_FOUND'
+        'LAME_DELEGATION_NO_NS_IP_ADDRESS'
     ]);
+    assert.equal(result.zoneApex, '');
+    assert.equal(result.hasZoneApexLookupFailure, true);
     assert.deepEqual(result.explorationLogs[1].glueIPs, []);
     assert.match(result.explorationLogs[1].rfc9471, /Unrelated.*192\.0\.2\.66.*採用しません/);
 });

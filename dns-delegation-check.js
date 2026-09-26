@@ -137,6 +137,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     let hasCnameOrDname = false;
     let hasAddressRecordWithoutDelegation = false;
     let hasNoDelegationForQname = false;
+    let hasZoneApexLookupFailure = false;
     let explorationLogs = [];
     let lastDelegatedZone = '';
     let lastDelegatedOrder = -1;
@@ -334,6 +335,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
                 currentNs,
                 currentParent
             );
+            hasZoneApexLookupFailure = true;
             break;
         }
 
@@ -373,11 +375,11 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         }
     }
 
-    if (!hasCnameOrDname && lastColocatedDelegation && lastColocatedDelegation.order > lastDelegatedOrder) {
+    if (!hasCnameOrDname && !hasZoneApexLookupFailure && lastColocatedDelegation && lastColocatedDelegation.order > lastDelegatedOrder) {
         zoneApex = lastColocatedDelegation.zoneApex;
         parentDelegationUnavailable = true;
         pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンと同じ権威サーバーで提供されているため、親側の委任情報は使用できません。`, currentNs, parentNs || null, { parentLogId: colocatedParentLogId });
-    } else if (!hasCnameOrDname && lastDelegatedZone) {
+    } else if (!hasCnameOrDname && !hasZoneApexLookupFailure && lastDelegatedZone) {
         zoneApex = lastDelegatedZone;
         pushExplorationLog('ZONE_APEX_FOUND', `ゾーン頂点を確定: ${zoneApex}。親ゾーンの委任情報を使用して検査します。`, currentNs, parentNs || null);
     }
@@ -391,6 +393,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         hasCnameOrDname,
         hasAddressRecordWithoutDelegation,
         hasNoDelegationForQname,
+        hasZoneApexLookupFailure,
         parentDelegationUnavailable: parentDelegationUnavailable,
         colocatedDelegation: lastColocatedDelegation,
         explorationLogs: explorationLogs,

@@ -165,6 +165,10 @@ test('verdictがゾーン頂点探索と委任追跡の結果を概要表示す�
     ]), '⚠️  検査対象外: 入力名は CNAME (別名) なので、ゾーン名を指定してください');
 
     assert.equal(renderVerdict([
+        { status: 'LAME_DELEGATION_NO_NS_IP_ADDRESS', detail: '委任先 NS の IP アドレスを取得できず、ゾーン頂点を確認できません。' }
+    ]), '⚠️  要確認: ゾーン頂点を確定できませんでした');
+
+    assert.equal(renderVerdict([
         { status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' },
         { status: 'NETWORK_ERROR', detail: '通信エラーです。' }
     ]), '⚠️  要確認: 通信エラーにより委任状態を確認できません');
