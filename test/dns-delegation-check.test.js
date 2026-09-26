@@ -57,6 +57,30 @@ test('最小化した問い合わせ名をルートから順に作る', () => {
     ]);
 });
 
+test('ゾーン頂点探索は名前解決と DNS クエリに AbortSignal を渡す', async () => {
+    const controller = new AbortController();
+    const querySignals = [];
+    let resolverSignal;
+    const result = await getZoneApex('com', new Map(), {
+        signal: controller.signal,
+        resolveServerIPs: async (name, dependencies) => {
+            resolverSignal = dependencies.signal;
+            return ['192.0.2.1'];
+        },
+        queryDirectlyUDP: async (name, serverIp, cache, qType, options) => {
+            querySignals.push(options.signal);
+            return qType === 'NS'
+                ? { flags: 1024, answers: [{ type: 'NS', name: 'com', data: 'a.root-servers.net' }] }
+                : { flags: 1024, answers: [] };
+        }
+    });
+
+    assert.equal(result.zoneApex, 'com');
+    assert.equal(resolverSignal, controller.signal);
+    assert.ok(querySignals.length > 0);
+    assert.ok(querySignals.every(signal => signal === controller.signal));
+});
+
 test('RFC 9471 要約で in-domain glue の不足とゾーン外アドレスを示す', () => {
     const nsRecords = [
         { type: 'NS', name: 'child.example.com', data: 'ns1.child.example.com' },
@@ -479,6 +503,34 @@ test('委任追跡の基本ステータスを判定する', async () => {
     );
     assert.equal(mismatch[0].status, 'LAME_DELEGATION_NOT_MATCH');
     assert.equal(mismatch[0].nsMatch.success, false);
+});
+
+test('委任追跡は DNS クエリに AbortSignal を渡す', async () => {
+    const controller = new AbortController();
+    const querySignals = [];
+    const result = await traceDomain(
+        'child.example.com',
+        ['192.0.2.20'],
+        new Map(),
+        null,
+        1,
+        [],
+        {},
+        {
+            signal: controller.signal,
+            queryDirectlyUDP: async (domain, serverIp, cache, qType, options) => {
+                querySignals.push(options.signal);
+                return {
+                    flags: 1024,
+                    answers: [{ type: 'NS', name: domain, data: 'ns1.child.example.com' }],
+                    authorities: []
+                };
+            }
+        }
+    );
+
+    assert.equal(result[0].status, 'SUCCESS');
+    assert.deepEqual(querySignals, [controller.signal]);
 });
 
 test('委任追跡のエラー・空応答・最大深度を記録する', async () => {
