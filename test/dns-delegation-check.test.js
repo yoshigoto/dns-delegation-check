@@ -73,7 +73,7 @@ test('RFC 9471 要約で in-domain glue の不足とゾーン外アドレスを�
 
     assert.match(summary, /TCP で再取得しました/);
     assert.match(summary, /in-domain glue: \[ns1\.child\.example\.com\]/);
-    assert.match(summary, /sibling glue \[ns3\.sibling\.example\.com: 192\.0\.2\.12\] は strict glue のため採用せず、名前解決を行います/);
+    assert.match(summary, /sibling glue \[ns3\.sibling\.example\.com: 192\.0\.2\.12\] は、本ツールの動作モードが strict glue のため採用せず、名前解決を行います/);
     assert.match(summary, /RFC 9499 で Unrelated.*ns2\.external\.example\.net: 192\.0\.2\.11.*採用しません/);
 });
 
