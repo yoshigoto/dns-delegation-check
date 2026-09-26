@@ -122,9 +122,16 @@ function getMinimizedQnames(domain) {
     return labels.map((_, index) => labels.slice(index).join('.')).reverse();
 }
 
+function createQueryFunction(dependencies) {
+    const query = dependencies.queryDirectlyUDP || queryDirectlyUDP;
+    if (!dependencies.signal) return query;
+    return (name, serverIp, cache, qType, options = {}) =>
+        query(name, serverIp, cache, qType, { ...options, signal: dependencies.signal });
+}
+
 async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     const resolveIPs = dependencies.resolveServerIPs || resolveServerIPs;
-    const queryUDP = dependencies.queryDirectlyUDP || queryDirectlyUDP;
+    const queryUDP = createQueryFunction(dependencies);
     const resolverDependencies = { ...dependencies, dnsResponseCache };
     let currentNs = 'a.root-servers.net';
     let currentZone = '';
@@ -406,7 +413,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
 
 async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, currentDepth = 1, expectedNSList = [], parentGlueMap = {}, dependencies = {}, serverNameMap = {}, currentZone = '') {
     const resolveIPs = dependencies.resolveServerIPs || resolveServerIPs;
-    const queryUDP = dependencies.queryDirectlyUDP || queryDirectlyUDP;
+    const queryUDP = createQueryFunction(dependencies);
     const resolverDependencies = { ...dependencies, dnsResponseCache };
     let results = [];
     if (currentDepth > 10) {
@@ -620,36 +627,45 @@ app.post('/api/trace', async (req, res) => {
     }
 
     const dnsResponseCache = new Map();
+    const abortController = new AbortController();
+    const abortOnResponseClose = () => {
+        if (!res.writableEnded) abortController.abort();
+    };
+    res.once('close', abortOnResponseClose);
+    let zoneApexTimer;
 
     try {
-        let zoneApexTimer;
         const zoneApexInfo = await Promise.race([
-            getZoneApex(domain, dnsResponseCache),
+            getZoneApex(domain, dnsResponseCache, { signal: abortController.signal }),
             new Promise(resolve => {
-                zoneApexTimer = setTimeout(() => resolve({
-                    timedOut: true,
-                    explorationLogs: [{
-                        id: 'zone-apex-timeout',
-                        server: '',
-                        parent: null,
-                        status: 'ZONE_APEX_LOOKUP_TIMEOUT',
-                        detail: 'ゾーン頂点の探索が 30 秒以内に完了しませんでした。DNS サーバーの応答状況を確認してください。',
-                        nsMatch: null,
-                        glueMatch: null
-                    }]
-                }), 30000);
+                zoneApexTimer = setTimeout(() => {
+                    abortController.abort();
+                    resolve({
+                        timedOut: true,
+                        explorationLogs: [{
+                            id: 'zone-apex-timeout',
+                            server: '',
+                            parent: null,
+                            status: 'ZONE_APEX_LOOKUP_TIMEOUT',
+                            detail: 'ゾーン頂点の探索が 30 秒以内に完了しませんでした。DNS サーバーの応答状況を確認してください。',
+                            nsMatch: null,
+                            glueMatch: null
+                        }]
+                    });
+                }, 30000);
             })
         ]);
         clearTimeout(zoneApexTimer);
+        if (res.destroyed) return;
         const explorationLog = zoneApexInfo.explorationLogs || zoneApexInfo.errorLogs || [];
 
         let traceLog = [];
         if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && !zoneApexInfo.parentDelegationUnavailable) {
             const serverList = zoneApexInfo.parentServerIPs.length > 0
                 ? zoneApexInfo.parentServerIPs
-                : await resolveServerIPs('a.root-servers.net', { dnsResponseCache });
+                : await resolveServerIPs('a.root-servers.net', { dnsResponseCache, signal: abortController.signal });
             const serverNameMap = zoneApexInfo.parentServerNameMap || Object.fromEntries(serverList.map(serverIp => [serverIp, zoneApexInfo.parentNs || 'a.root-servers.net']));
-            traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {}, {}, serverNameMap, zoneApexInfo.parentZone || '');
+            traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {}, { signal: abortController.signal }, serverNameMap, zoneApexInfo.parentZone || '');
         } else if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && zoneApexInfo.parentDelegationUnavailable) {
             const dsConfirmation = zoneApexInfo.colocatedDelegation?.dsConfirmsDelegation
                 ? ' DS レコードによりゾーンカットの存在は確認しました。'
@@ -671,7 +687,10 @@ app.post('/api/trace', async (req, res) => {
             traceLog: [...traceLog]
         });
     } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        if (!res.destroyed) res.status(500).json({ success: false, error: error.message });
+    } finally {
+        clearTimeout(zoneApexTimer);
+        res.off('close', abortOnResponseClose);
     }
 });
 
