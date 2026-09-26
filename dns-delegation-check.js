@@ -133,6 +133,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     let parentNs = '';
     let parentServerIPs = [];
     let parentServerNameMap = {};
+    let parentZone = '';
     let zoneApex = '';
     let hasCnameOrDname = false;
     let hasAddressRecordWithoutDelegation = false;
@@ -347,6 +348,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         currentNs = nextNsNames.join(', ');
         currentServerIPs = nextServerIPs;
         currentServerNameMap = nextServerNameMap;
+        parentZone = currentZone;
         currentZone = delegation.nextZone;
         lastDelegatedZone = delegation.nextZone;
         lastDelegatedOrder = qnameIndex;
@@ -389,6 +391,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         parentNs: parentNs,
         parentServerIPs: parentServerIPs,
         parentServerNameMap: parentServerNameMap,
+        parentZone: parentZone,
         zoneApex: zoneApex,
         hasCnameOrDname,
         hasAddressRecordWithoutDelegation,
@@ -646,7 +649,7 @@ app.post('/api/trace', async (req, res) => {
                 ? zoneApexInfo.parentServerIPs
                 : await resolveServerIPs('a.root-servers.net', { dnsResponseCache });
             const serverNameMap = zoneApexInfo.parentServerNameMap || Object.fromEntries(serverList.map(serverIp => [serverIp, zoneApexInfo.parentNs || 'a.root-servers.net']));
-            traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {}, {}, serverNameMap);
+            traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {}, {}, serverNameMap, zoneApexInfo.parentZone || '');
         } else if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && zoneApexInfo.parentDelegationUnavailable) {
             const dsConfirmation = zoneApexInfo.colocatedDelegation?.dsConfirmsDelegation
                 ? ' DS レコードによりゾーンカットの存在は確認しました。'

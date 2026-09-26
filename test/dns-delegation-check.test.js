@@ -238,6 +238,62 @@ test('ゾーン頂点探索は Unrelated な ADDITIONAL アドレスを採用し
     assert.match(result.explorationLogs[1].rfc9471, /Unrelated.*192\.0\.2\.66.*採用しません/);
 });
 
+test('ゾーン頂点探索で得た親ゾーン名を委任追跡に渡し、親ゾーン外のアドレスを sibling glue と誤判定しない', async () => {
+    // cf1111.tcpreplay.net -> ns1111.dublin.red の委任を模したケース
+    const zoneApexDependencies = createZoneApexTestDependencies([
+        { qname: 'net', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('net', 'ns.net', '192.0.2.2') },
+        { qname: 'example.net', serverIp: '192.0.2.2', qType: 'NS', value: referralResponse('example.net', 'ns1.example.net', '192.0.2.3') },
+        {
+            qname: 'cf.example.net', serverIp: '192.0.2.3', qType: 'NS', value: {
+                flags: 0,
+                answers: [],
+                authorities: [{ type: 'NS', name: 'cf.example.net', data: 'ns.example.red' }],
+                additionals: [{ type: 'A', name: 'ns.example.red', data: '192.0.2.66' }]
+            }
+        },
+        {
+            qname: 'cf.example.net', serverIp: '192.0.2.4', qType: 'NS', value: {
+                flags: 1024,
+                answers: [{ type: 'NS', name: 'cf.example.net', data: 'ns.example.red' }],
+                authorities: []
+            }
+        },
+        { qname: 'ns.example.red', serverIp: '192.0.2.4', qType: 'A', value: { flags: 1024, answers: [], authorities: [] } },
+        { qname: 'ns.example.red', serverIp: '192.0.2.4', qType: 'AAAA', value: { flags: 1024, answers: [], authorities: [] } }
+    ]);
+    const dependencies = {
+        ...zoneApexDependencies,
+        resolveServerIPs: async (name) => ({
+            'a.root-servers.net': ['192.0.2.1'],
+            'ns.example.red': ['192.0.2.4']
+        })[name] || null
+    };
+    const dnsResponseCache = new Map();
+
+    const zoneApexInfo = await getZoneApex('cf.example.net', dnsResponseCache, dependencies);
+
+    assert.equal(zoneApexInfo.zoneApex, 'cf.example.net');
+    assert.equal(zoneApexInfo.parentZone, 'example.net');
+    assert.deepEqual(zoneApexInfo.parentServerIPs, ['192.0.2.3']);
+
+    const traceLog = await traceDomain(
+        zoneApexInfo.zoneApex,
+        zoneApexInfo.parentServerIPs,
+        dnsResponseCache,
+        null,
+        1,
+        [],
+        {},
+        dependencies,
+        zoneApexInfo.parentServerNameMap,
+        zoneApexInfo.parentZone
+    );
+
+    assert.equal(traceLog[0].status, 'DELEGATED');
+    assert.match(traceLog[0].rfc9471, /Unrelated.*ns\.example\.red: 192\.0\.2\.66.*採用しません/);
+    assert.doesNotMatch(traceLog[0].rfc9471, /sibling glue/);
+});
+
 test('中間ラベルに委任がない場合でも下位ラベルの委任を探索してゾーン頂点を確定する', async () => {
     const dependencies = createZoneApexTestDependencies([
         { qname: 'jp', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('jp', 'ns.jp', '192.0.2.2') },
