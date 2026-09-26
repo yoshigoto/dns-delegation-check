@@ -21,6 +21,7 @@ https://www.on-link.jp/dnslamecheck/?domain=example.com
 - 親が保持する NS 情報と、子の権威サーバーが返す NS 情報を比較
 - 親の Glue レコードと、NS ホスト名から解決した IP アドレスを比較
 - RFC 9471 に基づき、in-domain glue、sibling glue、および TC による TCP 再試行を表示
+- BIND の strict glue と同様に、NS のターゲットが委任先ゾーン外の sibling glue は採用せず、名前解決を行う
 - RFC 9499 で Unrelated と分類される NS の ADDITIONAL アドレスは採用せず、その理由を警告表示
 - IPv4 と IPv6 に対応
 - UDP 応答が切り詰められた場合の TCP フォールバック

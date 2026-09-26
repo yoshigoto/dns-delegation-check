@@ -73,7 +73,7 @@ test('RFC 9471 要約で in-domain glue の不足とゾーン外アドレスを�
 
     assert.match(summary, /TCP で再取得しました/);
     assert.match(summary, /in-domain glue: \[ns1\.child\.example\.com\]/);
-    assert.match(summary, /sibling glue \[ns3\.sibling\.example\.com: 192\.0\.2\.12\] は候補として扱います/);
+    assert.match(summary, /sibling glue \[ns3\.sibling\.example\.com: 192\.0\.2\.12\] は strict glue のため採用せず、名前解決を行います/);
     assert.match(summary, /RFC 9499 で Unrelated.*ns2\.external\.example\.net: 192\.0\.2\.11.*採用しません/);
 });
 
@@ -182,7 +182,7 @@ test('委任のない権威応答でゾーン頂点探索を終了する', async
     ]);
 });
 
-test('ゾーン頂点探索は NS 名に一致するゾーン外 ADDITIONAL アドレスで TLD 委任を辿る', async () => {
+test('ゾーン頂点探索は sibling glue を採用せず TLD 委任を辿れない', async () => {
     const dependencies = createZoneApexTestDependencies([
         {
             qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: {
@@ -204,12 +204,12 @@ test('ゾーン頂点探索は NS 名に一致するゾーン外 ADDITIONAL ア�
 
     const result = await getZoneApex('yodobashi.com', new Map(), dependencies);
 
-    assert.equal(result.zoneApex, 'yodobashi.com');
+    assert.equal(result.zoneApex, '');
     assert.equal(result.explorationLogs[0].status, 'FOLLOW_DELEGATION');
     assert.deepEqual(result.explorationLogs[0].glueIPs, []);
-    assert.deepEqual(result.explorationLogs[0].fallbackAddressNotes, ['l.gtld-servers.net: [192.0.2.2]']);
-    assert.doesNotMatch(result.explorationLogs[0].detail, /ADDITIONAL SECTION/);
-    assert.equal(result.explorationLogs[1].server, 'l.gtld-servers.net');
+    assert.deepEqual(result.explorationLogs[0].fallbackAddressNotes, []);
+    assert.match(result.explorationLogs[0].rfc9471, /sibling glue \[l\.gtld-servers\.net: 192\.0\.2\.2\].*strict glue のため採用せず/);
+    assert.equal(result.explorationLogs[1].status, 'LAME_DELEGATION_NO_NS_IP_ADDRESS');
 });
 
 test('ゾーン頂点探索は Unrelated な ADDITIONAL アドレスを採用しない', async () => {
@@ -520,7 +520,7 @@ test('委任先の IP がない場合は追跡不能として記録する', asyn
     ]);
 });
 
-test('委任追跡は NS 名に一致するゾーン外 ADDITIONAL アドレスでも次サーバへ進む', async () => {
+test('委任追跡は sibling glue を採用せず次サーバへ進まない', async () => {
     const result = await traceDomain(
         'yodobashi.com',
         ['192.0.2.1'],
@@ -552,11 +552,9 @@ test('委任追跡は NS 名に一致するゾーン外 ADDITIONAL アドレス�
         })
     );
 
-    assert.deepEqual(result.map(log => log.status), ['DELEGATED', 'DELEGATED', 'SUCCESS']);
-    assert.equal(result[1].server, '192.0.2.2');
-    assert.equal(result[1].serverName, 'l.gtld-servers.net');
-    assert.match(result[0].rfc9471, /sibling glue \[l\.gtld-servers\.net: 192\.0\.2\.2\]/);
-    assert.deepEqual(result[0].fallbackAddressNotes, ['l.gtld-servers.net: [192.0.2.2]']);
+    assert.deepEqual(result.map(log => log.status), ['DELEGATED', 'LAME_DELEGATION_NO_NS_IP_ADDRESS']);
+    assert.match(result[0].rfc9471, /sibling glue \[l\.gtld-servers\.net: 192\.0\.2\.2\].*strict glue のため採用せず/);
+    assert.deepEqual(result[0].fallbackAddressNotes, []);
     assert.doesNotMatch(result[0].detail, /ADDITIONAL SECTION/);
 });
 
