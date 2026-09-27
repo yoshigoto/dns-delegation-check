@@ -97,8 +97,8 @@ test('RFC 9471 要約で in-domain glue の不足とゾーン外アドレスを�
 
     assert.match(summary, /TCP で再取得しました/);
     assert.match(summary, /in-domain glue: \[ns1\.child\.example\.com\]/);
-    assert.match(summary, /sibling glue \[ns3\.sibling\.example\.com: 192\.0\.2\.12\] は、本ツールの動作モードが strict glue のため採用せず、名前解決を行います/);
-    assert.match(summary, /RFC 9499 で Unrelated.*ns2\.external\.example\.net: 192\.0\.2\.11.*採用せず、名前解決を行います。/);
+    assert.match(summary, /\[ns3\.sibling\.example\.com: 192\.0\.2\.12\] は sibling glue ですが、本ツールの動作モードが strict glue のため採用せず、名前解決を行います。/);
+    assert.match(summary, /\[ns2\.external\.example\.net: 192\.0\.2\.11\] は RFC 9499 では unrelated に分類されるため、偽装アドレスを使わせる攻撃への対策として採用せず、名前解決を行います。/);
 });
 
 test('ゾーン頂点探索は CNAME と DNAME で終了ログを記録する', async (t) => {
@@ -232,7 +232,7 @@ test('ゾーン頂点探索は sibling glue を採用せず TLD 委任を辿れ�
     assert.equal(result.explorationLogs[0].status, 'FOLLOW_DELEGATION');
     assert.deepEqual(result.explorationLogs[0].glueIPs, []);
     assert.deepEqual(result.explorationLogs[0].fallbackAddressNotes, []);
-    assert.match(result.explorationLogs[0].rfc9471, /sibling glue \[l\.gtld-servers\.net: 192\.0\.2\.2\].*strict glue のため採用せず/);
+    assert.match(result.explorationLogs[0].rfc9471, /\[l\.gtld-servers\.net: 192\.0\.2\.2\] は sibling glue ですが、本ツールの動作モードが strict glue のため採用せず、名前解決を行います。/);
     assert.equal(result.explorationLogs[1].status, 'LAME_DELEGATION_NO_NS_IP_ADDRESS');
 });
 
@@ -259,7 +259,7 @@ test('ゾーン頂点探索は Unrelated な ADDITIONAL アドレスを採用し
     assert.equal(result.zoneApex, '');
     assert.equal(result.hasZoneApexLookupFailure, true);
     assert.deepEqual(result.explorationLogs[1].glueIPs, []);
-    assert.match(result.explorationLogs[1].rfc9471, /Unrelated.*192\.0\.2\.66.*採用せず、名前解決を行います。/);
+    assert.match(result.explorationLogs[1].rfc9471, /\[ns1\.example\.com: 192\.0\.2\.66\] は RFC 9499 では unrelated に分類されるため、偽装アドレスを使わせる攻撃への対策として採用せず、名前解決を行います。/);
 });
 
 test('ゾーン頂点探索で得た親ゾーン名を委任追跡に渡し、親ゾーン外のアドレスを sibling glue と誤判定しない', async () => {
@@ -314,7 +314,7 @@ test('ゾーン頂点探索で得た親ゾーン名を委任追跡に渡し、�
     );
 
     assert.equal(traceLog[0].status, 'DELEGATED');
-    assert.match(traceLog[0].rfc9471, /Unrelated.*ns\.example\.red: 192\.0\.2\.66.*採用せず、名前解決を行います。/);
+    assert.match(traceLog[0].rfc9471, /\[ns\.example\.red: 192\.0\.2\.66\] は RFC 9499 では unrelated に分類されるため、偽装アドレスを使わせる攻撃への対策として採用せず、名前解決を行います。/);
     assert.doesNotMatch(traceLog[0].rfc9471, /sibling glue/);
 });
 
@@ -661,7 +661,7 @@ test('委任追跡は sibling glue を採用せず次サーバへ進まない', 
     );
 
     assert.deepEqual(result.map(log => log.status), ['DELEGATED', 'LAME_DELEGATION_NO_NS_IP_ADDRESS']);
-    assert.match(result[0].rfc9471, /sibling glue \[l\.gtld-servers\.net: 192\.0\.2\.2\].*strict glue のため採用せず/);
+    assert.match(result[0].rfc9471, /\[l\.gtld-servers\.net: 192\.0\.2\.2\] は sibling glue ですが、本ツールの動作モードが strict glue のため採用せず、名前解決を行います。/);
     assert.deepEqual(result[0].fallbackAddressNotes, []);
     assert.doesNotMatch(result[0].detail, /ADDITIONAL SECTION/);
 });
@@ -698,7 +698,7 @@ test('委任追跡は Unrelated な ADDITIONAL アドレスを採用しない', 
     );
 
     assert.deepEqual(result.map(log => log.status), ['DELEGATED', 'DELEGATED', 'LAME_DELEGATION_NO_NS_IP_ADDRESS']);
-    assert.match(result[1].rfc9471, /Unrelated.*192\.0\.2\.66.*採用せず、名前解決を行います。/);
+    assert.match(result[1].rfc9471, /\[ns1\.example\.com: 192\.0\.2\.66\] は RFC 9499 では unrelated に分類されるため、偽装アドレスを使わせる攻撃への対策として採用せず、名前解決を行います。/);
 });
 
 test('委任追跡はゾーン外 ADDITIONAL アドレスより NS 名の名前解決結果を優先する', async () => {

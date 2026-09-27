@@ -51,10 +51,10 @@ function summarizeRfc9471Referral(nsRecords, additionals, retryFrom = '', parent
             ? `in-domain glue: [${inDomainGlueNames.join(', ')}]`
             : `ADDITIONAL SECTION に存在しない in-domain NS [${missingInDomainGlueNames.join(', ')}] は、親ゾーンで利用可能な glue が存在するかは応答だけでは判定できません。`;
     const siblingNote = siblingGlueRecords.length > 0
-        ? `ADDITIONAL SECTION の sibling glue [${siblingGlueRecords.map(record => `${normalizeDnsName(record.name)}: ${record.data}`).join(', ')}] は、本ツールの動作モードが strict glue のため採用せず、名前解決を行います。`
+        ? `ADDITIONAL SECTION の [${siblingGlueRecords.map(record => `${normalizeDnsName(record.name)}: ${record.data}`).join(', ')}] は sibling glue ですが、本ツールの動作モードが strict glue のため採用せず、名前解決を行います。`
         : '';
     const unrelatedNote = unrelatedAddressRecords.length > 0
-        ? `RFC 9499 で Unrelated と分類される ADDITIONAL SECTION のアドレス [${unrelatedAddressRecords.map(record => `${normalizeDnsName(record.name)}: ${record.data}`).join(', ')}] は、偽装アドレスを使わせる攻撃への対策として採用せず、名前解決を行います。`
+        ? `ADDITIONAL SECTION の [${unrelatedAddressRecords.map(record => `${normalizeDnsName(record.name)}: ${record.data}`).join(', ')}] は RFC 9499 では unrelated に分類されるため、偽装アドレスを使わせる攻撃への対策として採用せず、名前解決を行います。`
         : '';
 
     return [transportNote, inDomainNote, siblingNote, unrelatedNote].filter(Boolean).join('\r');
