@@ -54,7 +54,7 @@ function summarizeRfc9471Referral(nsRecords, additionals, retryFrom = '', parent
         ? `ADDITIONAL SECTION の sibling glue [${siblingGlueRecords.map(record => `${normalizeDnsName(record.name)}: ${record.data}`).join(', ')}] は、本ツールの動作モードが strict glue のため採用せず、名前解決を行います。`
         : '';
     const unrelatedNote = unrelatedAddressRecords.length > 0
-        ? `RFC 9499 で Unrelated と分類される ADDITIONAL SECTION のアドレス [${unrelatedAddressRecords.map(record => `${normalizeDnsName(record.name)}: ${record.data}`).join(', ')}] は、偽装アドレスを使わせる攻撃への対策として採用しません。`
+        ? `RFC 9499 で Unrelated と分類される ADDITIONAL SECTION のアドレス [${unrelatedAddressRecords.map(record => `${normalizeDnsName(record.name)}: ${record.data}`).join(', ')}] は、偽装アドレスを使わせる攻撃への対策として採用せず、名前解決を行います。`
         : '';
 
     return [transportNote, inDomainNote, siblingNote, unrelatedNote].filter(Boolean).join('\r');
