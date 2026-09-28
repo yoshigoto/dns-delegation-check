@@ -694,10 +694,11 @@ app.post('/api/trace', async (req, res) => {
     }
 });
 
+const HOST = '127.0.0.1';
 const PORT = 3001;
 
 function startServer() {
-    const server = app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+    const server = app.listen(PORT, HOST, () => console.log(`Server running on http://${HOST}:${PORT}`));
     server.timeout = 120000;
     return server;
 }
