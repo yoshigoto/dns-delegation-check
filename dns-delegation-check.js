@@ -84,25 +84,6 @@ function getReferralAddressRecords(additionals, nsNames, delegatedZone, parentZo
     return inDomainGlueRecords;
 }
 
-function getKnownAddresses(additionals) {
-    const knownAddresses = new Map();
-    for (const record of additionals) {
-        if (record.type !== 'A' && record.type !== 'AAAA') continue;
-        const name = normalizeDnsName(record.name);
-        const addresses = knownAddresses.get(name) || [];
-        if (!addresses.includes(record.data)) addresses.push(record.data);
-        knownAddresses.set(name, addresses);
-    }
-    return knownAddresses;
-}
-
-function getAddressesForName(addressRecords, nsName) {
-    const normalized = normalizeDnsName(nsName);
-    return addressRecords
-        .filter(record => normalizeDnsName(record.name) === normalized)
-        .map(record => record.data);
-}
-
 async function resolveAuthoritativeServerIPs(name, serverIp, dnsResponseCache, queryUDP) {
     const responses = await Promise.all(['A', 'AAAA'].map(async type =>
         queryUDP(name, serverIp, dnsResponseCache, type)
@@ -242,14 +223,16 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             );
             let dsConfirmsDelegation = false;
 
-            for (const { serverIp } of authoritativeResponses) {
-                const dsResponse = await queryUDP(qname, serverIp, dnsResponseCache, 'DS');
-                if (dsResponse.error) continue;
+            if (!childNsResponse) {
+                for (const { serverIp } of authoritativeResponses) {
+                    const dsResponse = await queryUDP(qname, serverIp, dnsResponseCache, 'DS');
+                    if (dsResponse.error) continue;
 
-                const dsAnswers = dsResponse.answers || [];
-                if (dsAnswers.some(record => record.type === 'DS' && normalizeDnsName(record.name) === qname)) {
-                    dsConfirmsDelegation = true;
-                    break;
+                    const dsAnswers = dsResponse.answers || [];
+                    if (dsAnswers.some(record => record.type === 'DS' && normalizeDnsName(record.name) === qname)) {
+                        dsConfirmsDelegation = true;
+                        break;
+                    }
                 }
             }
 
@@ -288,8 +271,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         }
 
         const nextNsNames = delegation.nsRecords.map(record => normalizeDnsName(record.data));
-        const referralAddressRecords = getReferralAddressRecords(delegation.additionals, nextNsNames, delegation.nextZone, currentZone);
-        const inBailiwickGlueRecords = referralAddressRecords.filter(record => isInBailiwickGlue(record, nextNsNames, delegation.nextZone));
+        const inBailiwickGlueRecords = getReferralAddressRecords(delegation.additionals, nextNsNames, delegation.nextZone, currentZone);
         const inBailiwickGlueNames = new Set(inBailiwickGlueRecords.map(record => normalizeDnsName(record.name)));
         const glueIPs = inBailiwickGlueRecords.map(record => record.data);
         const nextServerNameMap = {};
@@ -310,28 +292,16 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
                 if (!nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = nsName;
             });
         });
-        const fallbackReferralIPs = resolvedIPsByName
-            .filter(({ ips }) => !ips || ips.length === 0)
-            .flatMap(({ nsName }) => getAddressesForName(referralAddressRecords, nsName));
-        const fallbackAddressNotes = resolvedIPsByName
-            .filter(({ ips }) => !ips || ips.length === 0)
-            .map(({ nsName }) => ({ nsName, addresses: getAddressesForName(referralAddressRecords, nsName) }))
-            .filter(({ addresses }) => addresses.length > 0)
-            .map(({ nsName, addresses }) => `${nsName}: [${addresses.join(', ')}]`);
-        fallbackReferralIPs.forEach(serverIp => {
-            const referralRecord = referralAddressRecords.find(record => record.data === serverIp && nextNsNames.includes(normalizeDnsName(record.name)));
-            if (referralRecord && !nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = normalizeDnsName(referralRecord.name);
-        });
-        const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPsByName.flatMap(({ ips }) => (ips || []).filter(Boolean)), ...fallbackReferralIPs])];
+        const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPsByName.flatMap(({ ips }) => (ips || []).filter(Boolean))])];
         const unresolvedNsNames = resolvedIPsByName
-            .filter(({ nsName, ips }) => (!ips || ips.length === 0) && getAddressesForName(referralAddressRecords, nsName).length === 0)
+            .filter(({ ips }) => !ips || ips.length === 0)
             .map(({ nsName }) => nsName);
 
         const delegationLog = pushExplorationLog('FOLLOW_DELEGATION', `${qname} に対して ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
             parentLogId: currentParentLogId,
             nextServer: nextNsNames,
             glueIPs,
-            fallbackAddressNotes,
+            fallbackAddressNotes: [],
             rfc9471: summarizeRfc9471Referral(delegation.nsRecords, delegation.additionals, '', currentZone),
             nsResolutionWarning: unresolvedNsNames.length > 0 ? { names: unresolvedNsNames } : null
         });
@@ -568,14 +538,12 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             let nextGlueMap = {};
             let nextServerIPs = [];
             let nextServerNameMap = {};
-            const fallbackAddressNotes = [];
 
             for (const ns of nsRecords) {
                 const nsKey = normalizeDnsName(ns.data);
                 nextGlueMap[nsKey] = [];
 
-                const matchedAddressRecords = getReferralAddressRecords(additionals, [nsKey], delegatedZone, currentZone);
-                const matchedGlues = matchedAddressRecords.filter(record => isInBailiwickGlue(record, [nsKey], delegatedZone));
+                const matchedGlues = getReferralAddressRecords(additionals, [nsKey], delegatedZone, currentZone);
                 matchedGlues.forEach(g => {
                     nextGlueMap[nsKey].push(g.data);
                     nextServerIPs.push(g.data);
@@ -584,21 +552,14 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
 
                 if (matchedGlues.length === 0) {
                     const resolvedIPs = await resolveIPs(ns.data, resolverDependencies);
-                    const nextIPs = resolvedIPs && resolvedIPs.length > 0
-                        ? resolvedIPs
-                        : matchedAddressRecords.map(record => record.data);
-                    if ((!resolvedIPs || resolvedIPs.length === 0) && nextIPs.length > 0) {
-                        fallbackAddressNotes.push(`${nsKey}: [${nextIPs.join(', ')}]`);
-                    }
-
-                    nextIPs.forEach(ip => {
+                    (resolvedIPs || []).filter(Boolean).forEach(ip => {
                         nextServerIPs.push(ip);
                         if (!nextServerNameMap[ip]) nextServerNameMap[ip] = nsKey;
                     });
                 }
             }
 
-            logEntry.fallbackAddressNotes = fallbackAddressNotes;
+            logEntry.fallbackAddressNotes = [];
             nextServerIPs = [...new Set(nextServerIPs)];
 
             if (nextServerIPs.length > 0) {

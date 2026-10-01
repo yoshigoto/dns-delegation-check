@@ -236,6 +236,49 @@ test('ゾーン頂点探索は sibling glue を採用せず TLD 委任を辿れ�
     assert.equal(result.explorationLogs[1].status, 'LAME_DELEGATION_NO_NS_IP_ADDRESS');
 });
 
+test('ゾーン頂点探索は glue のない NS だけを名前解決する', async () => {
+    const resolvedNames = [];
+    const dependencies = {
+        ...createZoneApexTestDependencies([
+            { qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('com', 'ns.com', '192.0.2.2') },
+            {
+                qname: 'example.com', serverIp: '192.0.2.2', qType: 'NS', value: {
+                    flags: 0,
+                    answers: [],
+                    authorities: [
+                        { type: 'NS', name: 'example.com', data: 'ns1.example.com' },
+                        { type: 'NS', name: 'example.com', data: 'ns2.external.net' }
+                    ],
+                    additionals: [{ type: 'A', name: 'ns1.example.com', data: '192.0.2.3' }]
+                }
+            },
+            ...['192.0.2.3', '192.0.2.4'].map(serverIp => ({
+                qname: 'example.com', serverIp, qType: 'NS', value: {
+                    flags: 1024,
+                    answers: [{ type: 'NS', name: 'example.com', data: 'ns1.example.com' }],
+                    authorities: []
+                }
+            }))
+        ]),
+        resolveServerIPs: async name => {
+            resolvedNames.push(name);
+            return {
+                'a.root-servers.net': ['192.0.2.1'],
+                'ns2.external.net': ['192.0.2.4']
+            }[name] || [];
+        }
+    };
+
+    const result = await getZoneApex('example.com', new Map(), dependencies);
+    const delegation = result.explorationLogs.find(log =>
+        log.status === 'FOLLOW_DELEGATION' && log.nextServer?.includes('ns2.external.net')
+    );
+
+    assert.equal(result.zoneApex, 'example.com');
+    assert.deepEqual(resolvedNames, ['a.root-servers.net', 'ns2.external.net']);
+    assert.deepEqual(delegation.glueIPs, ['192.0.2.3']);
+});
+
 test('ゾーン頂点探索は Unrelated な ADDITIONAL アドレスを採用しない', async () => {
     const dependencies = createZoneApexTestDependencies([
         { qname: 'jp', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('jp', 'ns.jp', '192.0.2.2') },
@@ -411,7 +454,6 @@ test('親子同居のゾーン頂点探索ログを親子階層で保持する',
                 authorities: []
             }
         },
-        { qname: 'example.com', serverIp: '192.0.2.2', qType: 'DS', value: { flags: 1024, answers: [], authorities: [] } },
         {
             qname: 'www.example.com', serverIp: '192.0.2.2', qType: 'NS', value: {
                 flags: 1024,
