@@ -6,12 +6,12 @@
 
 公開版は次の URL から利用できます。
 
-<https://www.on-link.jp/dnslamecheck/>
+<https://www.on-link.jp/dns-delegation-check/>
 
 URL パラメーターで調査対象を指定することもできます。
 
 ```text
-https://www.on-link.jp/dnslamecheck/?domain=example.com
+https://www.on-link.jp/dns-delegation-check/?domain=example.com
 ```
 
 ## 機能
@@ -180,7 +180,6 @@ Content-Type: application/json
 - `dns-delegation-check.js`: Express サーバー、DNS 問い合わせ、委任追跡、API
 - `server.js`: 本番実行時に Express サーバーを起動するためのファイル
 - `package.json`: Node.js の依存パッケージと ES Modules 設定
-- `public/`: Express が静的配信するファイル置き場
 
 ## 注意事項
 
