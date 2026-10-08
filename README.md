@@ -43,15 +43,17 @@ https://www.on-link.jp/dns-delegation-check/?domain=example.com
 | `LAME_DELEGATION_NO_ZONE` | 権威サーバーとして指定されているが、ゾーンを保持していない |
 | `LAME_DELEGATION_NO_AUTHORITY_NS` | 権威応答の Authority セクションに NS レコードがない |
 | `LAME_DELEGATION_NO_IP_ADDRESS` | NS ホスト名の IP アドレスを解決できない |
+| `LAME_DELEGATION_NO_NS_IP_ADDRESS` | ゾーン頂点探索中に、委任先 NS の IP アドレスを取得できず追跡を続けられない |
 | `LAME_DELEGATION_TIMEOUT` | DNS サーバーから応答がない |
 | `LAME_DELEGATION_MAX_DEPTH` | 委任チェーンが最大深度に達した |
 | `NETWORK_ERROR` | DNS 通信または応答の解析でエラーが発生した |
+| `ZONE_APEX_LOOKUP_TIMEOUT` | ゾーン頂点探索が 30 秒以内に完了しなかった |
 | `CNAME_FOUND` | 入力名が CNAME のため、ゾーン委任の検査対象外になった |
 | `DNAME_FOUND` | DNAME によりゾーン頂点を確定できなかった |
 
 ## 必要な環境
 
-- Node.js 18 以降を推奨
+- Node.js 18 以降（`package.json` で指定するプロジェクト要件）
 - DNS サーバーへ UDP/TCP の 53 番ポートで接続できるネットワーク
 
 ## WSL2 の Ubuntu で開発する場合
@@ -136,7 +138,7 @@ location / {
 npm test
 ```
 
-テストは `test/dns-delegation-check.test.js` にあります。DNS サーバーへ実際に問い合わせる処理は、固定したモック応答に差し替えて評価します。実際の外部 DNS やネットワークの状態には依存しません。
+テストは `test/dns-delegation-check.test.js` と `test/index-summary.test.js` にあります。DNS サーバーへ実際に問い合わせる処理は、固定したモック応答に差し替えて評価します。実際の外部 DNS やネットワークの状態には依存しません。
 
 ## 使い方
 
@@ -167,6 +169,7 @@ Content-Type: application/json
 ```json
 {
   "success": true,
+  "parentDelegationUnavailable": false,
   "zoneApexLog": [],
   "traceLog": []
 }
