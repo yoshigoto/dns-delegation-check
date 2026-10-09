@@ -586,7 +586,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                 }
 
                 const childServerIPs = nextServerIPs.filter(nextServerIp => !visitedOnPath.has(nextServerIp));
-                if (childServerIPs.length > 0) {
+                if (visitedDestinations.length === 0 && childServerIPs.length > 0) {
                     const childResults = await traceDomain(domain, childServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap, dependencies, nextServerNameMap, delegatedZone, [...visitedServerIPs, serverIp]);
                     results = results.concat(childResults);
                 }
