@@ -648,7 +648,7 @@ test('委任先が親と同じサーバーを指し子ゾーンを提供しな�
     assert.match(result[1].detail, /サーバー自身 \(192\.0\.2\.10\) を指しています/);
 });
 
-test('複数サーバー間で循環する委任先を追跡済みとして検出する', async () => {
+test('委任先の一部が追跡済みなら同じ応答の他の子NSへ追跡を広げない', async () => {
     const queriedServers = [];
     const result = await traceDomain(
         'child.example.com',
@@ -665,19 +665,25 @@ test('複数サーバー間で循環する委任先を追跡済みとして検�
                 return {
                     flags: 0,
                     answers: [],
-                    authorities: [{ type: 'NS', name: 'child.example.com', data: 'ns.child.example.com' }],
+                    authorities: [
+                        { type: 'NS', name: 'child.example.com', data: 'ns1.child.example.com' },
+                        { type: 'NS', name: 'child.example.com', data: 'ns2.child.example.com' }
+                    ],
                     additionals: [
-                        { type: 'A', name: 'ns.child.example.com', data: '192.0.2.10' },
-                        { type: 'A', name: 'ns.child.example.com', data: '192.0.2.20' }
+                        { type: 'A', name: 'ns1.child.example.com', data: '192.0.2.10' },
+                        { type: 'A', name: 'ns2.child.example.com', data: '192.0.2.20' }
                     ]
                 };
             }
         }
     );
 
-    assert.deepEqual(queriedServers, ['192.0.2.10', '192.0.2.20']);
-    assert.equal(result.filter(log => log.status === 'LAME_DELEGATION_NO_ZONE').length, 3);
-    assert.ok(result.some(log => log.server === '192.0.2.10' && log.parent === '192.0.2.20'));
+    assert.deepEqual(queriedServers, ['192.0.2.10']);
+    assert.deepEqual(result.map(log => log.status), [
+        'DELEGATED',
+        'LAME_DELEGATION_NO_ZONE'
+    ]);
+    assert.match(result[1].detail, /192\.0\.2\.10/);
     assert.equal(result.some(log => log.status === 'LAME_DELEGATION_MAX_DEPTH'), false);
 });
 
