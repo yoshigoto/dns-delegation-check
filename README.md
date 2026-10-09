@@ -40,7 +40,7 @@ https://www.on-link.jp/dns-delegation-check/?domain=example.com
 | `SUCCESS` | 権威サーバーが応答し、委任情報が一致している |
 | `COLOCATED_DELEGATION` | 親子ゾーンが同じ権威サーバーで提供され、親が保持する NS 情報を取得・比較できない |
 | `LAME_DELEGATION_NOT_MATCH` | NS または IP アドレスの情報が一致していない |
-| `LAME_DELEGATION_NO_ZONE` | 権威サーバーとして指定されているが、ゾーンを保持していない |
+| `LAME_DELEGATION_NO_ZONE` | 権威サーバーとして指定されているがゾーンを保持していない、または委任先が同じサーバーへの紹介を繰り返す |
 | `LAME_DELEGATION_NO_AUTHORITY_NS` | 権威応答の Authority セクションに NS レコードがない |
 | `LAME_DELEGATION_NO_IP_ADDRESS` | NS ホスト名の IP アドレスを解決できない |
 | `LAME_DELEGATION_NO_NS_IP_ADDRESS` | ゾーン頂点探索中に、委任先 NS の IP アドレスを取得できず追跡を続けられない |

@@ -563,8 +563,22 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             nextServerIPs = [...new Set(nextServerIPs)];
 
             if (nextServerIPs.length > 0) {
-                const childResults = await traceDomain(domain, nextServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap, dependencies, nextServerNameMap, delegatedZone);
-                results = results.concat(childResults);
+                const selfReferentialServerIPs = nextServerIPs.filter(nextServerIp => nextServerIp === serverIp);
+                if (selfReferentialServerIPs.length > 0) {
+                    results.push({
+                        server: serverIp,
+                        serverName: serverNameMap[serverIp] || '',
+                        parent: parentIP,
+                        status: 'LAME_DELEGATION_NO_ZONE',
+                        detail: `委任先 NS (${currentNSNames.join(', ')}) が応答したサーバー自身 (${serverIp}) を指しています。このサーバーは対象ゾーンへの委任を返し、権威応答を返していません。`
+                    });
+                }
+
+                const childServerIPs = nextServerIPs.filter(nextServerIp => nextServerIp !== serverIp);
+                if (childServerIPs.length > 0) {
+                    const childResults = await traceDomain(domain, childServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap, dependencies, nextServerNameMap, delegatedZone);
+                    results = results.concat(childResults);
+                }
             } else {
                 results.push({
                     server: currentNSNames.join(', '), parent: serverIp, status: 'LAME_DELEGATION_NO_NS_IP_ADDRESS',

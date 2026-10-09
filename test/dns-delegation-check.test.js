@@ -616,6 +616,77 @@ test('委任追跡のエラー・空応答・最大深度を記録する', async
     assert.equal(maxDepth[0].status, 'LAME_DELEGATION_MAX_DEPTH');
 });
 
+test('委任先が親と同じサーバーを指し子ゾーンを提供しない場合は追跡ループを検出する', async () => {
+    const queriedServers = [];
+    const result = await traceDomain(
+        'child.example.com',
+        ['192.0.2.10'],
+        new Map(),
+        null,
+        1,
+        [],
+        {},
+        {
+            resolveServerIPs: async () => null,
+            queryDirectlyUDP: async (_domain, serverIp) => {
+                queriedServers.push(serverIp);
+                return {
+                    flags: 0,
+                    answers: [],
+                    authorities: [{ type: 'NS', name: 'child.example.com', data: 'ns.child.example.com' }],
+                    additionals: [{ type: 'A', name: 'ns.child.example.com', data: '192.0.2.10' }]
+                };
+            }
+        }
+    );
+
+    assert.deepEqual(queriedServers, ['192.0.2.10']);
+    assert.deepEqual(result.map(log => log.status), [
+        'DELEGATED',
+        'LAME_DELEGATION_NO_ZONE'
+    ]);
+    assert.match(result[1].detail, /サーバー自身 \(192\.0\.2\.10\) を指しています/);
+});
+
+test('委任先が親と別サーバーの場合は権威応答で子ゾーンの有無を判定する', async () => {
+    const queriedServers = [];
+    const result = await traceDomain(
+        'child.example.com',
+        ['192.0.2.10'],
+        new Map(),
+        null,
+        1,
+        [],
+        {},
+        {
+            resolveServerIPs: async () => null,
+            queryDirectlyUDP: async (_domain, serverIp) => {
+                queriedServers.push(serverIp);
+                if (serverIp === '192.0.2.10') {
+                    return {
+                        flags: 0,
+                        answers: [],
+                        authorities: [{ type: 'NS', name: 'child.example.com', data: 'ns.child.example.com' }],
+                        additionals: [{ type: 'A', name: 'ns.child.example.com', data: '192.0.2.20' }]
+                    };
+                }
+                return {
+                    flags: 1024,
+                    rcode: 'NXDOMAIN',
+                    answers: [],
+                    authorities: [{ type: 'SOA', name: 'child.example.com', data: 'ns.example.com' }]
+                };
+            }
+        }
+    );
+
+    assert.deepEqual(queriedServers, ['192.0.2.10', '192.0.2.20']);
+    assert.deepEqual(result.map(log => log.status), [
+        'DELEGATED',
+        'LAME_DELEGATION_NO_ZONE'
+    ]);
+});
+
 test('複数の委任先 NS は並列に問い合わせ、タイムアウト待ちを累積しない', async () => {
     const queryDelayMs = 30;
     const startedAt = Date.now();
