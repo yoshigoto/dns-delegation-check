@@ -381,7 +381,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     };
 }
 
-async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, currentDepth = 1, expectedNSList = [], parentGlueMap = {}, dependencies = {}, serverNameMap = {}, currentZone = '') {
+async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, currentDepth = 1, expectedNSList = [], parentGlueMap = {}, dependencies = {}, serverNameMap = {}, currentZone = '', visitedServerIPs = []) {
     const resolveIPs = dependencies.resolveServerIPs || resolveServerIPs;
     const queryUDP = createQueryFunction(dependencies);
     const resolverDependencies = { ...dependencies, dnsResponseCache };
@@ -410,6 +410,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             nsMatch: null,
             glueMatch: null
         };
+        const visitedOnPath = new Set([...visitedServerIPs, serverIp]);
 
         const res = await queryUDP(domain, serverIp, dnsResponseCache, 'NS');
 
@@ -563,8 +564,32 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             nextServerIPs = [...new Set(nextServerIPs)];
 
             if (nextServerIPs.length > 0) {
-                const childResults = await traceDomain(domain, nextServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap, dependencies, nextServerNameMap, delegatedZone);
-                results = results.concat(childResults);
+                const visitedDestinations = nextServerIPs.filter(nextServerIp => visitedOnPath.has(nextServerIp));
+                for (const visitedDestination of visitedDestinations) {
+                    if (visitedDestination === serverIp) {
+                        results.push({
+                            server: serverIp,
+                            serverName: serverNameMap[serverIp] || '',
+                            parent: parentIP,
+                            status: 'LAME_DELEGATION_NO_ZONE',
+                            detail: `委任先 NS の一部 (${currentNSNames.join(', ')}) が応答したサーバー自身 (${serverIp}) を指しています。このサーバーは対象ゾーンへの委任を返し、権威応答を返していません。`
+                        });
+                    } else {
+                        results.push({
+                            server: visitedDestination,
+                            serverName: nextServerNameMap[visitedDestination] || '',
+                            parent: serverIp,
+                            status: 'LAME_DELEGATION_NO_ZONE',
+                            detail: `委任先 NS (${currentNSNames.join(', ')}) が追跡済みのサーバー (${visitedDestination}) を指しています。このサーバーは対象ゾーンへの委任を返し、権威応答を返していません。`
+                        });
+                    }
+                }
+
+                const childServerIPs = nextServerIPs.filter(nextServerIp => !visitedOnPath.has(nextServerIp));
+                if (childServerIPs.length > 0) {
+                    const childResults = await traceDomain(domain, childServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap, dependencies, nextServerNameMap, delegatedZone, [...visitedServerIPs, serverIp]);
+                    results = results.concat(childResults);
+                }
             } else {
                 results.push({
                     server: currentNSNames.join(', '), parent: serverIp, status: 'LAME_DELEGATION_NO_NS_IP_ADDRESS',
