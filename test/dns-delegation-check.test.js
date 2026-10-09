@@ -648,6 +648,39 @@ test('委任先が親と同じサーバーを指し子ゾーンを提供しな�
     assert.match(result[1].detail, /サーバー自身 \(192\.0\.2\.10\) を指しています/);
 });
 
+test('複数サーバー間で循環する委任先を追跡済みとして検出する', async () => {
+    const queriedServers = [];
+    const result = await traceDomain(
+        'child.example.com',
+        ['192.0.2.10'],
+        new Map(),
+        null,
+        1,
+        [],
+        {},
+        {
+            resolveServerIPs: async () => null,
+            queryDirectlyUDP: async (_domain, serverIp) => {
+                queriedServers.push(serverIp);
+                return {
+                    flags: 0,
+                    answers: [],
+                    authorities: [{ type: 'NS', name: 'child.example.com', data: 'ns.child.example.com' }],
+                    additionals: [
+                        { type: 'A', name: 'ns.child.example.com', data: '192.0.2.10' },
+                        { type: 'A', name: 'ns.child.example.com', data: '192.0.2.20' }
+                    ]
+                };
+            }
+        }
+    );
+
+    assert.deepEqual(queriedServers, ['192.0.2.10', '192.0.2.20']);
+    assert.equal(result.filter(log => log.status === 'LAME_DELEGATION_NO_ZONE').length, 3);
+    assert.ok(result.some(log => log.server === '192.0.2.10' && log.parent === '192.0.2.20'));
+    assert.equal(result.some(log => log.status === 'LAME_DELEGATION_MAX_DEPTH'), false);
+});
+
 test('委任先が親と別サーバーの場合は権威応答で子ゾーンの有無を判定する', async () => {
     const queriedServers = [];
     const result = await traceDomain(
