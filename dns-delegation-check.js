@@ -570,7 +570,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                         serverName: serverNameMap[serverIp] || '',
                         parent: parentIP,
                         status: 'LAME_DELEGATION_NO_ZONE',
-                        detail: `委任先 NS (${currentNSNames.join(', ')}) が応答したサーバー自身 (${serverIp}) を指しています。このサーバーは対象ゾーンへの委任を返し、権威応答を返していません。`
+                        detail: `委任先 NS の一部 (${currentNSNames.join(', ')}) が応答したサーバー自身 (${serverIp}) を指しています。このサーバーは対象ゾーンへの委任を返し、権威応答を返していません。`
                     });
                 }
 
