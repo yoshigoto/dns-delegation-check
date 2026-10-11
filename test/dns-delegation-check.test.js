@@ -149,6 +149,65 @@ test('グルー情報はルートを親とする sibling domain を分類する'
     assert.equal(result[0].glueInfo.records[0].classification, 'sibling domain');
 });
 
+test('ゾーン頂点探索は全親サーバーの ADDITIONAL と通信失敗を別々に保持する', async () => {
+    const parentIPs = ['192.0.2.2', '192.0.2.3', '2001:db8::4', '192.0.2.5'];
+    const rootResponse = referralResponse('com', 'ns.com', parentIPs[0]);
+    rootResponse.additionals = parentIPs.map(data => ({
+        type: data.includes(':') ? 'AAAA' : 'A', name: 'ns.com', data
+    }));
+    const first = referralResponse('example.com', 'ns.example.com', '192.0.2.10');
+    const last = {
+        flags: 0, answers: [],
+        authorities: [
+            { type: 'NS', name: 'example.com', data: 'ns.other.com' },
+            { type: 'NS', name: 'example.com', data: 'ns.example.net' }
+        ],
+        additionals: [
+            { type: 'A', name: 'ns.other.com', data: '192.0.2.50' },
+            { type: 'AAAA', name: 'ns.example.net', data: '2001:db8::50' }
+        ]
+    };
+    const result = await getZoneApex('example.com', new Map(), createZoneApexTestDependencies([
+        { qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: rootResponse },
+        { qname: 'example.com', serverIp: parentIPs[0], qType: 'NS', value: first },
+        { qname: 'example.com', serverIp: parentIPs[1], qType: 'NS', value: { flags: 0, authorities: [], additionals: [{ type: 'OPT', name: '.', options: [] }] } },
+        { qname: 'example.com', serverIp: parentIPs[2], qType: 'NS', value: { error: 'TIMEOUT', detail: 'no response' } },
+        { qname: 'example.com', serverIp: parentIPs[3], qType: 'NS', value: last },
+        { qname: 'example.com', serverIp: '192.0.2.10', qType: 'NS', value: { error: 'TIMEOUT' } }
+    ]));
+    assert.equal(result.zoneApex, 'example.com');
+    assert.deepEqual(result.parentServerIPs, [parentIPs[0]], '委任追跡のサーバー選択は変更しない');
+    const infos = result.parentGlueInfos;
+    assert.deepEqual(infos.map(info => info.server), parentIPs);
+    assert.ok(infos.every(info => info.parentZone === 'com' && info.delegatedZone === 'example.com' && info.serverName === 'ns.com'));
+    assert.equal(infos[0].records[0].classification, 'in-domain');
+    assert.equal(infos[0].records[0].data, '192.0.2.10');
+    assert.deepEqual(infos[1].records, []);
+    assert.equal(infos[2].records, null);
+    assert.equal(infos[2].error, 'TIMEOUT');
+    assert.equal(infos[2].detail, 'no response');
+    assert.deepEqual(infos[3].records.map(record => record.classification), ['sibling domain', 'unrelated']);
+});
+
+test('NS IP 未取得でも親サーバー別情報を保持し、対象外入力には祖先の情報を表示しない', async () => {
+    const dependencies = createZoneApexTestDependencies([
+        { qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('com', 'ns.com', '192.0.2.2') },
+        { qname: 'example.com', serverIp: '192.0.2.2', qType: 'NS', value: {
+            flags: 0, authorities: [{ type: 'NS', name: 'example.com', data: 'ns.example.net' }], additionals: []
+        } }
+    ]);
+    const result = await getZoneApex('example.com', new Map(), dependencies);
+    assert.equal(result.hasZoneApexLookupFailure, true);
+    assert.equal(result.parentGlueInfos.length, 1);
+    assert.equal(result.parentGlueInfos[0].server, '192.0.2.2');
+    assert.deepEqual(result.parentGlueInfos[0].records, []);
+    const alias = await getZoneApex('alias.com', new Map(), createZoneApexTestDependencies([
+        { qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('com', 'ns.com', '192.0.2.2') },
+        { qname: 'alias.com', serverIp: '192.0.2.2', qType: 'NS', value: { flags: 1024, answers: [{ type: 'CNAME', name: 'alias.com', data: 'example.net' }] } }
+    ]));
+    assert.deepEqual(alias.parentGlueInfos, []);
+});
+
 test('グルー情報は空・OPT のみの応答と通信失敗を区別し、親サーバーの順序を保持する', async () => {
     for (const additionals of [undefined, [], [{ type: 'OPT', name: '.', options: [] }]]) {
         const result = await traceDomain('example.com', ['192.0.2.1'], new Map(), null, 1, [], {},

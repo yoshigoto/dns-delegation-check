@@ -96,7 +96,7 @@ function getElementText(element) {
     return [element.textContent, ...element.children.map(getElementText)].join('\n');
 }
 
-test('グルー情報の箱は委任追跡ログの下に表示し、最初の親の応答だけを表示する', () => {
+test('グルー情報の箱は委任追跡ログの下に表示し、親サーバーごとの応答を表示する', () => {
     const { buildDualLogView } = loadPageWithSearch();
     const target = createElement();
     const info = {
@@ -122,14 +122,17 @@ test('グルー情報の箱は委任追跡ログの下に表示し、最初の�
         '192.0.2.10', '2001:db8::1', 'in-domain', 'sibling domain', 'unrelated', '分類対象外', '{"value":"test"}']) {
         assert.ok(text.includes(expected), expected);
     }
-    assert.ok(!text.includes('SECOND_SERVER'));
-    const table = body.children.find(element => element.className === 'glue-table');
+    assert.ok(text.includes('SECOND_SERVER'));
+    const sections = body.children.filter(element => element.className === 'glue-server');
+    assert.equal(sections.length, 2);
+    assert.match(getElementText(sections[1]), /ADDITIONAL SECTION は空/);
+    const table = sections[0].children.find(element => element.className === 'glue-table');
     const unsafeNameCell = table.children[1].children[3].children[0];
     assert.equal(unsafeNameCell.textContent, '<img src=x onerror=alert(1)>');
     assert.equal(unsafeNameCell.innerHTML, '');
 });
 
-test('空の ADDITIONAL と取得不能を区別し、最初の空応答を後続の応答で置き換えない', () => {
+test('空の ADDITIONAL と取得不能を区別し、後続サーバーのレコードも表示する', () => {
     const { renderGlueInfo } = loadPageWithSearch();
     const target = createElement();
     renderGlueInfo([
@@ -137,7 +140,8 @@ test('空の ADDITIONAL と取得不能を区別し、最初の空応答を後�
         { glueInfo: { server: 'SECOND_SERVER', parentZone: 'com', records: [{ type: 'A', data: '192.0.2.99' }] } }
     ], target);
     assert.match(getElementText(target), /ADDITIONAL SECTION は空です（OPT Pseudo Section は除外）/);
-    assert.ok(!getElementText(target).includes('SECOND_SERVER'));
+    assert.ok(getElementText(target).includes('SECOND_SERVER'));
+    assert.ok(getElementText(target).includes('192.0.2.99'));
     const unavailable = createElement();
     renderGlueInfo([], unavailable);
     assert.match(getElementText(unavailable), /応答を取得できない/);
@@ -145,6 +149,33 @@ test('空の ADDITIONAL と取得不能を区別し、最初の空応答を後�
     const colocated = createElement();
     renderGlueInfo([], colocated, true);
     assert.match(getElementText(colocated), /親子ゾーンが同じ権威サーバー/);
+});
+
+test('API のサーバー別グルー情報を優先し、通信失敗を空と誤表示しない', async () => {
+    const infos = [
+        { server: 'FIRST', parentZone: 'com', records: [] },
+        { server: '2001:db8::2', serverName: 'ns2.com', parentZone: 'com', records: null, error: 'TIMEOUT', detail: 'test error' },
+        { server: 'THIRD', parentZone: 'com', records: [{ name: 'ns.example.net', type: 'A', data: '192.0.2.99', classification: 'unrelated' }] }
+    ];
+    const { domainInput, resultContainer, startTrace } = loadPageWithSearch('', async () => ({
+        json: async () => ({
+            success: true,
+            zoneApexLog: [{ status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' }],
+            traceLog: [{ server: 'OLD_SERVER', parent: null, status: 'DELEGATED', glueInfo: { server: 'OLD_SERVER', records: [] } }],
+            parentGlueInfos: infos
+        })
+    }));
+    domainInput.value = 'example.com';
+    await startTrace();
+    const body = resultContainer.children[0].children[2].children[1];
+    const sections = body.children.filter(element => element.className === 'glue-server');
+    assert.equal(sections.length, 3);
+    assert.match(getElementText(sections[0]), /FIRST[\s\S]*空です/);
+    assert.match(getElementText(sections[1]), /ns2\.com \(2001:db8::2\)[\s\S]*TIMEOUT - test error/);
+    assert.ok(!getElementText(sections[1]).includes('空です'));
+    assert.match(getElementText(sections[2]), /THIRD[\s\S]*192\.0\.2\.99[\s\S]*unrelated/);
+    assert.ok(!getElementText(body).includes('OLD_SERVER'));
+    assert.ok(!getElementText(body).includes('最初に取得'));
 });
 
 test('NS 名前解決失敗で追跡できなくても探索中に取得した親のグルー情報を表示する', () => {

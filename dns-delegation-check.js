@@ -143,6 +143,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     let parentServerIPs = [];
     let parentServerNameMap = {};
     let parentZone = '';
+    let parentGlueInfos = [];
     let zoneApex = '';
     let hasCnameOrDname = false;
     let hasAddressRecordWithoutDelegation = false;
@@ -318,6 +319,24 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             .filter(({ ips }) => !ips || ips.length === 0)
             .map(({ nsName }) => nsName);
 
+        parentGlueInfos = serverResponses.map(({ serverIp, res }) => {
+            const serverName = currentServerNameMap[serverIp] || currentNs;
+            if (res.error) {
+                return {
+                    server: serverIp, serverName, parentZone: currentZone || '.',
+                    delegatedZone: qname, records: null,
+                    error: res.error, detail: res.detail || ''
+                };
+            }
+            const nsRecords = (res.authorities || []).filter(record =>
+                record.type === 'NS' && normalizeDnsName(record.name) === qname
+            );
+            return {
+                ...buildGlueInfo(res.additionals || [], nsRecords, currentZone, serverIp, serverName),
+                delegatedZone: qname
+            };
+        });
+
         const delegationLog = pushExplorationLog('FOLLOW_DELEGATION', `${qname} に対して ${nextNsNames.join(', ')} を示しました。 (${delegation.serverIp})`, currentNs, currentParent, {
             parentLogId: currentParentLogId,
             nextServer: nextNsNames,
@@ -391,6 +410,8 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         parentServerIPs: parentServerIPs,
         parentServerNameMap: parentServerNameMap,
         parentZone: parentZone,
+        parentGlueInfos: parentDelegationUnavailable || (!zoneApex && !hasZoneApexLookupFailure)
+            ? [] : parentGlueInfos,
         zoneApex: zoneApex,
         hasCnameOrDname,
         hasAddressRecordWithoutDelegation,
@@ -694,6 +715,7 @@ app.post('/api/trace', async (req, res) => {
         res.json({
             success: true,
             parentDelegationUnavailable: zoneApexInfo.parentDelegationUnavailable === true,
+            parentGlueInfos: zoneApexInfo.parentGlueInfos || [],
             zoneApexLog: [...explorationLog],
             traceLog: [...traceLog]
         });

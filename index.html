@@ -191,6 +191,11 @@
         .glue-note {
             font-size: 0.8rem;
         }
+        .glue-server {
+            margin-top: 16px;
+            padding-top: 8px;
+            border-top: 1px solid #dfeaf7;
+        }
         .glue-table {
             width: 100%;
             border-collapse: collapse;
@@ -453,7 +458,7 @@ async function startTrace() {
             return;
         }
 
-        buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnavailable);
+        buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnavailable, data.parentGlueInfos);
 
     } catch (e) {
         clearTimeout(timeoutId);
@@ -738,11 +743,13 @@ function renderLogTree(logData, target) {
     target.appendChild(mainListWrapper);
 }
 
-function renderGlueInfo(traceLog, target, parentDelegationUnavailable = false, zoneApexLog = []) {
+function renderGlueInfo(traceLog, target, parentDelegationUnavailable = false, zoneApexLog = [], parentGlueInfos) {
     const failedNsLookup = zoneApexLog.some(item => item.status === 'LAME_DELEGATION_NO_NS_IP_ADDRESS');
-    const info = traceLog.find(item => item.glueInfo)?.glueInfo ||
-        (failedNsLookup ? [...zoneApexLog].reverse().find(item => item.glueInfo)?.glueInfo : null);
-    if (!info) {
+    const fallbackInfo = failedNsLookup ? [...zoneApexLog].reverse().find(item => item.glueInfo)?.glueInfo : null;
+    const infos = parentDelegationUnavailable ? [] : Array.isArray(parentGlueInfos) ? parentGlueInfos
+        : traceLog.some(item => item.glueInfo) ? traceLog.filter(item => item.glueInfo).map(item => item.glueInfo)
+        : fallbackInfo ? [fallbackInfo] : [];
+    if (infos.length === 0) {
         const message = document.createElement('div');
         message.className = 'empty-log';
         message.textContent = parentDelegationUnavailable
@@ -752,9 +759,31 @@ function renderGlueInfo(traceLog, target, parentDelegationUnavailable = false, z
         return;
     }
 
+    const note = document.createElement('p');
+    note.className = 'glue-note';
+    note.textContent = '親の権威サーバーに問い合わせた結果をサーバー IP ごとに表示します（OPT は除外）。RFC 9499 の分類は各サーバーが返した委任先 NS に対応する A/AAAA レコードが対象です。なお、委任追跡の際にこれらの IP アドレスを必ず採用するということではありません。';
+    target.appendChild(note);
+
+    infos.forEach(info => {
+        const section = document.createElement('div');
+        section.className = 'glue-server';
+        renderGlueServerInfo(info, section);
+        target.appendChild(section);
+    });
+}
+
+function renderGlueServerInfo(info, target) {
     const source = document.createElement('p');
     source.textContent = `取得元: ${info.serverName ? `${info.serverName} (${info.server})` : info.server} / 親ゾーン: ${info.parentZone}${info.delegatedZone ? ` / 委任先: ${info.delegatedZone}` : ''}`;
     target.appendChild(source);
+
+    if (info.error) {
+        const message = document.createElement('div');
+        message.className = 'empty-log';
+        message.textContent = `応答を取得できないため、ADDITIONAL SECTION は確認できません。エラー: ${info.error}${info.detail ? ` - ${info.detail}` : ''}`;
+        target.appendChild(message);
+        return;
+    }
 
     if (info.records.length === 0) {
         const message = document.createElement('div');
@@ -763,11 +792,6 @@ function renderGlueInfo(traceLog, target, parentDelegationUnavailable = false, z
         target.appendChild(message);
         return;
     }
-
-    const note = document.createElement('p');
-    note.className = 'glue-note';
-    note.textContent = '親の権威サーバーのうち、最初に取得した応答のみ表示します（OPT は除外）。RFC 9499 の分類は委任先 NS に対応する A/AAAA レコードが対象です。なお、委任追跡の際にこれらの IP アドレスを必ず採用するということではありません。';
-    target.appendChild(note);
 
     const table = document.createElement('table');
     table.className = 'glue-table';
@@ -795,7 +819,7 @@ function renderGlueInfo(traceLog, target, parentDelegationUnavailable = false, z
     target.appendChild(table);
 }
 
-function buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnavailable = false) {
+function buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnavailable = false, parentGlueInfos) {
     container.innerHTML = '';
     buildSummary([...zoneApexLog, ...traceLog], parentDelegationUnavailable, traceLog);
 
@@ -844,7 +868,7 @@ function buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnav
     gluePanel.appendChild(glueHeader);
     const glueBody = document.createElement('div');
     glueBody.className = 'log-panel-body';
-    renderGlueInfo(traceLog, glueBody, parentDelegationUnavailable, zoneApexLog);
+    renderGlueInfo(traceLog, glueBody, parentDelegationUnavailable, zoneApexLog, parentGlueInfos);
     gluePanel.appendChild(glueBody);
 
     wrapper.appendChild(zonePanel);
