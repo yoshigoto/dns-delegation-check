@@ -188,6 +188,9 @@
             text-align: center;
             padding: 24px 12px;
         }
+        .glue-note {
+            font-size: 0.8rem;
+        }
         .glue-table {
             width: 100%;
             border-collapse: collapse;
@@ -762,6 +765,7 @@ function renderGlueInfo(traceLog, target, parentDelegationUnavailable = false, z
     }
 
     const note = document.createElement('p');
+    note.className = 'glue-note';
     note.textContent = '親の権威サーバーのうち、最初に取得した応答のみ表示します（OPT は除外）。RFC 9499 の分類は委任先 NS に対応する A/AAAA レコードが対象です。表示は IP アドレスの採用を意味しません。';
     target.appendChild(note);
 
