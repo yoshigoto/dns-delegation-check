@@ -101,6 +101,75 @@ test('RFC 9471 要約で in-domain glue の不足とゾーン外アドレスを�
     assert.match(summary, /\[ns2\.external\.example\.net: 192\.0\.2\.11\] は RFC 9499 では unrelated に分類されるため、偽装アドレスを使わせる攻撃への対策として採用せず、名前解決を行います。/);
 });
 
+test('グルー情報は親の ADDITIONAL 全レコードを保持し、NS アドレスを RFC 9499 に分類する', async () => {
+    const zone = 'child.sub.example.com';
+    const nsNames = [
+        'NS.Child.Sub.Example.COM.', zone, 'ns.sibling.example.com',
+        'example.com', 'ns.notexample.com'
+    ];
+    const additionals = nsNames.map((name, index) => ({
+        name, type: index === 1 ? 'AAAA' : 'A', ttl: 3600, class: 'IN',
+        data: index === 1 ? '2001:db8::1' : `192.0.2.${10 + index}`
+    }));
+    additionals.push(
+        { type: 'A', name: 'not-an-ns.child.sub.example.com', ttl: 60, data: '192.0.2.99' },
+        { type: 'TXT', name: zone, ttl: 60, data: [Buffer.from('test')] },
+        { type: 'OPT', name: '.', udpPayloadSize: 1232, options: [] }
+    );
+    const response = {
+        flags: 0, answers: [],
+        authorities: nsNames.map(data => ({ type: 'NS', name: zone, data })),
+        additionals
+    };
+    const result = await traceDomain(zone, ['192.0.2.1'], new Map(), null, 1, [], {},
+        createTraceTestDependencies({
+            '192.0.2.1': response,
+            '192.0.2.10': { error: 'TIMEOUT' },
+            '2001:db8::1': { error: 'TIMEOUT' }
+        }),
+        { '192.0.2.1': 'ns.parent.example.com' }, 'example.com');
+    const info = result[0].glueInfo;
+    assert.equal(info.server, '192.0.2.1');
+    assert.equal(info.serverName, 'ns.parent.example.com');
+    assert.equal(info.parentZone, 'example.com');
+    assert.equal(info.delegatedZone, zone);
+    assert.deepEqual(info.records.map(record => record.classification), [
+        'in-domain', 'in-domain', 'sibling domain', 'sibling domain', 'unrelated', null, null
+    ]);
+    assert.deepEqual(info.records.map(({ classification, ...record }) => record), additionals.slice(0, -1));
+    assert.equal(response.additionals.at(-1).type, 'OPT', '元の DNS 応答を変更しない');
+});
+
+test('グルー情報はルートを親とする sibling domain を分類する', async () => {
+    const result = await traceDomain('com', ['192.0.2.1'], new Map(), null, 1, [], {},
+        createTraceTestDependencies({
+            '192.0.2.1': referralResponse('com', 'a.gtld-servers.net', '192.0.2.2')
+        }), {}, '');
+    assert.equal(result[0].glueInfo.parentZone, '.');
+    assert.equal(result[0].glueInfo.records[0].classification, 'sibling domain');
+});
+
+test('グルー情報は空・OPT のみの応答と通信失敗を区別し、親サーバーの順序を保持する', async () => {
+    for (const additionals of [undefined, [], [{ type: 'OPT', name: '.', options: [] }]]) {
+        const result = await traceDomain('example.com', ['192.0.2.1'], new Map(), null, 1, [], {},
+            createTraceTestDependencies({
+                '192.0.2.1': { flags: 0, authorities: [], additionals }
+            }));
+        assert.deepEqual(result[0].glueInfo.records, []);
+    }
+    const result = await traceDomain('example.com', ['192.0.2.1', '192.0.2.2', '192.0.2.3'],
+        new Map(), null, 1, [], {}, {
+            queryDirectlyUDP: async (domain, server) => {
+                if (server === '192.0.2.1') return { error: 'TIMEOUT' };
+                if (server === '192.0.2.2') await new Promise(resolve => setTimeout(resolve, 10));
+                return { flags: 0, authorities: [], additionals: [{ type: 'TXT', name: domain, data: server }] };
+            }
+        });
+    assert.equal(result[0].glueInfo, undefined);
+    assert.equal(result[1].glueInfo.server, '192.0.2.2');
+    assert.equal(result[2].glueInfo.server, '192.0.2.3');
+});
+
 test('ゾーン頂点探索は CNAME と DNAME で終了ログを記録する', async (t) => {
     for (const record of [
         { type: 'CNAME', data: 'target.example.net', status: 'CNAME_FOUND' },

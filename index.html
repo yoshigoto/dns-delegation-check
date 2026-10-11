@@ -188,6 +188,25 @@
             text-align: center;
             padding: 24px 12px;
         }
+        .glue-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .glue-table th, .glue-table td {
+            padding: 8px;
+            border: 1px solid #dfeaf7;
+            text-align: left;
+            vertical-align: top;
+            overflow-wrap: anywhere;
+        }
+        .glue-table th {
+            background: #eef6ff;
+        }
+        .glue-table td {
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
 
         .indent-list {
             list-style: none;
@@ -716,6 +735,62 @@ function renderLogTree(logData, target) {
     target.appendChild(mainListWrapper);
 }
 
+function renderGlueInfo(traceLog, target, parentDelegationUnavailable = false, zoneApexLog = []) {
+    const failedNsLookup = zoneApexLog.some(item => item.status === 'LAME_DELEGATION_NO_NS_IP_ADDRESS');
+    const info = traceLog.find(item => item.glueInfo)?.glueInfo ||
+        (failedNsLookup ? [...zoneApexLog].reverse().find(item => item.glueInfo)?.glueInfo : null);
+    if (!info) {
+        const message = document.createElement('div');
+        message.className = 'empty-log';
+        message.textContent = parentDelegationUnavailable
+            ? '親子ゾーンが同じ権威サーバーのため、親側 referral の ADDITIONAL SECTION は取得できません。'
+            : '親の権威サーバーの応答を取得できないため、ADDITIONAL SECTION は確認できません。';
+        target.appendChild(message);
+        return;
+    }
+
+    const source = document.createElement('p');
+    source.textContent = `取得元: ${info.serverName ? `${info.serverName} (${info.server})` : info.server} / 親ゾーン: ${info.parentZone}${info.delegatedZone ? ` / 委任先: ${info.delegatedZone}` : ''}`;
+    target.appendChild(source);
+
+    if (info.records.length === 0) {
+        const message = document.createElement('div');
+        message.className = 'empty-log';
+        message.textContent = 'ADDITIONAL SECTION は空です（OPT Pseudo Section は除外）。';
+        target.appendChild(message);
+        return;
+    }
+
+    const note = document.createElement('p');
+    note.textContent = '親の権威サーバーのうち、最初に取得した応答のみ表示します（OPT は除外）。RFC 9499 の分類は委任先 NS に対応する A/AAAA レコードが対象です。表示は IP アドレスの採用を意味しません。';
+    target.appendChild(note);
+
+    const table = document.createElement('table');
+    table.className = 'glue-table';
+    const header = document.createElement('tr');
+    ['名前', 'TTL', 'CLASS', 'TYPE', '内容', 'RFC 9499 分類'].forEach(label => {
+        const cell = document.createElement('th');
+        cell.textContent = label;
+        header.appendChild(cell);
+    });
+    const head = document.createElement('thead');
+    head.appendChild(header);
+    table.appendChild(head);
+    const body = document.createElement('tbody');
+    info.records.forEach(record => {
+        const row = document.createElement('tr');
+        const data = typeof record.data === 'string' ? record.data : JSON.stringify(record.data);
+        [record.name || '.', record.ttl ?? '-', record.class || 'IN', record.type, data ?? '-', record.classification || '分類対象外'].forEach(value => {
+            const cell = document.createElement('td');
+            cell.textContent = String(value);
+            row.appendChild(cell);
+        });
+        body.appendChild(row);
+    });
+    table.appendChild(body);
+    target.appendChild(table);
+}
+
 function buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnavailable = false) {
     container.innerHTML = '';
     buildSummary([...zoneApexLog, ...traceLog], parentDelegationUnavailable, traceLog);
@@ -757,11 +832,22 @@ function buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnav
     }
     tracePanel.appendChild(traceBody);
 
+    const gluePanel = document.createElement('div');
+    gluePanel.className = 'log-panel';
+    const glueHeader = document.createElement('div');
+    glueHeader.className = 'log-panel-header';
+    glueHeader.textContent = 'グルー情報';
+    gluePanel.appendChild(glueHeader);
+    const glueBody = document.createElement('div');
+    glueBody.className = 'log-panel-body';
+    renderGlueInfo(traceLog, glueBody, parentDelegationUnavailable, zoneApexLog);
+    gluePanel.appendChild(glueBody);
+
     wrapper.appendChild(zonePanel);
     wrapper.appendChild(tracePanel);
+    wrapper.appendChild(gluePanel);
     container.appendChild(wrapper);
 }
 </script>
 </body>
 </html>
-
