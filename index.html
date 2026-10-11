@@ -187,9 +187,13 @@
             color: #666;
             text-align: center;
             padding: 24px 12px;
+            font-size: 0.8rem;
         }
         .glue-note {
             font-size: 0.8rem;
+        }
+        .glue-source {
+            font-size: 0.9rem;
         }
         .glue-server {
             margin-top: 16px;
@@ -774,6 +778,7 @@ function renderGlueInfo(traceLog, target, parentDelegationUnavailable = false, z
 
 function renderGlueServerInfo(info, target) {
     const source = document.createElement('p');
+    source.className = 'glue-source';
     source.textContent = `取得元: ${info.serverName ? `${info.serverName} (${info.server})` : info.server} / 親ゾーン: ${info.parentZone}${info.delegatedZone ? ` / 委任先: ${info.delegatedZone}` : ''}`;
     target.appendChild(source);
 
