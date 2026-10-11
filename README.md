@@ -28,6 +28,10 @@ https://www.on-link.jp/dns-delegation-check/?domain=example.com
 - EDNS に対応していない DNS サーバーへの再試行
 - DNS 応答の短時間キャッシュ
 - ゾーン頂点探索ログと委任追跡ログをツリー形式で表示
+- 委任追跡ログの下の「グルー情報」に、親の権威サーバーの最初の取得可能な応答の ADDITIONAL SECTION を表示（複数サーバーの応答は合算しない）
+  - 委任先 NS に対応する A/AAAA レコードを RFC 9499 の `in-domain`、`sibling domain`、`unrelated` に分類し、それ以外は分類対象外として表示
+  - OPT Pseudo Section を除外し、空の ADDITIONAL SECTION と応答を取得できない場合を区別
+  - 表示はアドレスの採用を意味せず、既存の strict glue による追跡動作は変更しない
 - CNAME、DNAME、タイムアウト、通信エラーなどを表示し、ゾーン頂点探索のタイムアウトやクライアント切断時には進行中の DNS 問い合わせを中断
 
 ## 判定結果

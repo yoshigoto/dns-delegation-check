@@ -80,7 +80,9 @@ function loadPageWithSearch(search = '', fetchImpl) {
         summaryPanel,
         resultContainer,
         startTrace: context.startTrace,
-        renderLogTree: context.renderLogTree
+        renderLogTree: context.renderLogTree,
+        renderGlueInfo: context.renderGlueInfo,
+        buildDualLogView: context.buildDualLogView
     };
 }
 
@@ -89,6 +91,74 @@ function renderVerdict(logData, parentDelegationUnavailable = false, delegationL
     buildSummary(logData, parentDelegationUnavailable, delegationLogData);
     return summaryPanel.children[0].textContent;
 }
+
+function getElementText(element) {
+    return [element.textContent, ...element.children.map(getElementText)].join('\n');
+}
+
+test('グルー情報の箱は委任追跡ログの下に表示し、最初の親の応答だけを表示する', () => {
+    const { buildDualLogView } = loadPageWithSearch();
+    const target = createElement();
+    const info = {
+        server: '192.0.2.1', serverName: 'ns.example.com', parentZone: 'example.com',
+        delegatedZone: 'child.example.com',
+        records: [
+            { name: 'ns.child.example.com', ttl: 3600, class: 'IN', type: 'A', data: '192.0.2.10', classification: 'in-domain' },
+            { name: 'ns.sibling.example.com', ttl: 60, type: 'AAAA', data: '2001:db8::1', classification: 'sibling domain' },
+            { name: 'ns.example.net', ttl: 60, type: 'A', data: '192.0.2.11', classification: 'unrelated' },
+            { name: '<img src=x onerror=alert(1)>', type: 'TXT', data: { value: 'test' }, classification: null }
+        ]
+    };
+    buildDualLogView([], [
+        { server: '192.0.2.1', parent: null, status: 'DELEGATED', glueInfo: info },
+        { server: '192.0.2.2', parent: null, status: 'DELEGATED', glueInfo: { ...info, server: 'SECOND_SERVER', records: [] } }
+    ], target);
+    const panels = target.children[0].children;
+    assert.deepEqual(panels.map(panel => panel.children[0].textContent),
+        ['ゾーン頂点探索ログ', '委任追跡ログ', 'グルー情報']);
+    const body = panels[2].children[1];
+    const text = getElementText(body);
+    for (const expected of ['ns.example.com (192.0.2.1)', 'child.example.com', '3600', 'IN', 'AAAA',
+        '192.0.2.10', '2001:db8::1', 'in-domain', 'sibling domain', 'unrelated', '分類対象外', '{"value":"test"}']) {
+        assert.ok(text.includes(expected), expected);
+    }
+    assert.ok(!text.includes('SECOND_SERVER'));
+    const table = body.children.find(element => element.className === 'glue-table');
+    const unsafeNameCell = table.children[1].children[3].children[0];
+    assert.equal(unsafeNameCell.textContent, '<img src=x onerror=alert(1)>');
+    assert.equal(unsafeNameCell.innerHTML, '');
+});
+
+test('空の ADDITIONAL と取得不能を区別し、最初の空応答を後続の応答で置き換えない', () => {
+    const { renderGlueInfo } = loadPageWithSearch();
+    const target = createElement();
+    renderGlueInfo([
+        { glueInfo: { server: '192.0.2.1', parentZone: 'com', records: [] } },
+        { glueInfo: { server: 'SECOND_SERVER', parentZone: 'com', records: [{ type: 'A', data: '192.0.2.99' }] } }
+    ], target);
+    assert.match(getElementText(target), /ADDITIONAL SECTION は空です（OPT Pseudo Section は除外）/);
+    assert.ok(!getElementText(target).includes('SECOND_SERVER'));
+    const unavailable = createElement();
+    renderGlueInfo([], unavailable);
+    assert.match(getElementText(unavailable), /応答を取得できない/);
+    assert.ok(!getElementText(unavailable).includes('空です'));
+    const colocated = createElement();
+    renderGlueInfo([], colocated, true);
+    assert.match(getElementText(colocated), /親子ゾーンが同じ権威サーバー/);
+});
+
+test('NS 名前解決失敗で追跡できなくても探索中に取得した親のグルー情報を表示する', () => {
+    const { renderGlueInfo } = loadPageWithSearch();
+    const target = createElement();
+    renderGlueInfo([], target, false, [
+        { glueInfo: { server: 'OLD_SERVER', parentZone: '.', records: [] } },
+        { glueInfo: { server: '192.0.2.1', parentZone: 'com', records: [] } },
+        { status: 'LAME_DELEGATION_NO_NS_IP_ADDRESS' }
+    ]);
+    assert.match(getElementText(target), /192\.0\.2\.1/);
+    assert.ok(!getElementText(target).includes('OLD_SERVER'));
+    assert.match(getElementText(target), /ADDITIONAL SECTION は空/);
+});
 
 test('domain クエリがあると自動で解析を開始する', async () => {
     let fetchCalled = false;

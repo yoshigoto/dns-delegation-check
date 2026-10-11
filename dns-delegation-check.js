@@ -84,6 +84,27 @@ function getReferralAddressRecords(additionals, nsNames, delegatedZone, parentZo
     return inDomainGlueRecords;
 }
 
+function buildGlueInfo(additionals, nsRecords, parentZone, server, serverName) {
+    const delegatedZone = normalizeDnsName(nsRecords[0]?.name);
+    const nsNames = nsRecords.map(record => normalizeDnsName(record.data));
+    const { inDomainGlueRecords, siblingGlueRecords, unrelatedAddressRecords } =
+        classifyReferralAddressRecords(additionals, nsNames, delegatedZone, parentZone);
+
+    return {
+        server,
+        serverName,
+        parentZone: parentZone || '.',
+        delegatedZone,
+        records: additionals.filter(record => record.type !== 'OPT').map(record => ({
+            ...record,
+            classification: inDomainGlueRecords.includes(record) ? 'in-domain'
+                : siblingGlueRecords.includes(record) ? 'sibling domain'
+                : unrelatedAddressRecords.includes(record) ? 'unrelated'
+                : null
+        }))
+    };
+}
+
 async function resolveAuthoritativeServerIPs(name, serverIp, dnsResponseCache, queryUDP) {
     const responses = await Promise.all(['A', 'AAAA'].map(async type =>
         queryUDP(name, serverIp, dnsResponseCache, type)
@@ -301,6 +322,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             parentLogId: currentParentLogId,
             nextServer: nextNsNames,
             glueIPs,
+            glueInfo: buildGlueInfo(delegation.additionals, delegation.nsRecords, currentZone, delegation.serverIp, currentServerNameMap[delegation.serverIp] || currentNs),
             fallbackAddressNotes: [],
             rfc9471: summarizeRfc9471Referral(delegation.nsRecords, delegation.additionals, '', currentZone),
             nsResolutionWarning: unresolvedNsNames.length > 0 ? { names: unresolvedNsNames } : null
@@ -437,6 +459,10 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
         const answers = res.answers || [];
         const authorities = res.authorities || [];
         const additionals = res.additionals || [];
+        const nsRecords = authorities.filter(r => r.type === 'NS' && hasParentChildRelationship(domain, r.name));
+        if (currentDepth === 1) {
+            logEntry.glueInfo = buildGlueInfo(additionals, nsRecords, currentZone, serverIp, logEntry.serverName);
+        }
 
         const cacheNote = res.isCached ? ' (キャッシュ再利用)' : '';
 
@@ -526,7 +552,6 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             return results;
         }
 
-        const nsRecords = authorities.filter(r => r.type === 'NS' && hasParentChildRelationship(domain, r.name));
         if (nsRecords.length > 0) {
             logEntry.status = 'DELEGATED';
             logEntry.detail = `AUTHORITY SECTION に ${nsRecords.length} 個の NS レコード。IP アドレスを以下に列挙。${cacheNote}`;
