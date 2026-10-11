@@ -29,6 +29,7 @@ https://www.on-link.jp/dns-delegation-check/?domain=example.com
 - DNS 応答の短時間キャッシュ
 - ゾーン頂点探索ログと委任追跡ログをツリー形式で表示
 - 委任追跡ログの下の「グルー情報」に、ゾーン頂点探索で問い合わせた親の各権威サーバーの ADDITIONAL SECTION をサーバー IP ごとに表示（複数サーバーの応答は合算しない）
+  - 各表を「名前」、次に「内容」の昇順で表示（名前の大小文字・末尾のドットは同一視し、文字列中の数字は自然順で比較）
   - 委任先 NS に対応する A/AAAA レコードを RFC 9499 の `in-domain`、`sibling domain`、`unrelated` に分類し、それ以外は分類対象外として表示
   - OPT Pseudo Section を除外し、空の ADDITIONAL SECTION と応答を取得できない場合をサーバーごとに区別
   - 表示はアドレスの採用を意味せず、既存の strict glue による追跡動作は変更しない

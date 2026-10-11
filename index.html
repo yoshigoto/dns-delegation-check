@@ -805,10 +805,17 @@ function renderGlueServerInfo(info, target) {
     head.appendChild(header);
     table.appendChild(head);
     const body = document.createElement('tbody');
-    info.records.forEach(record => {
+    const sortedRecords = info.records.map(record => ({
+        record,
+        name: (record.name || '.').replace(/\.$/, '').toLowerCase(),
+        data: (typeof record.data === 'string' ? record.data : JSON.stringify(record.data)) ?? '-'
+    })).sort((a, b) =>
+        a.name.localeCompare(b.name, 'en', { numeric: true }) ||
+        a.data.localeCompare(b.data, 'en', { numeric: true })
+    );
+    sortedRecords.forEach(({ record, data }) => {
         const row = document.createElement('tr');
-        const data = typeof record.data === 'string' ? record.data : JSON.stringify(record.data);
-        [record.name || '.', record.ttl ?? '-', record.class || 'IN', record.type, data ?? '-', record.classification || '分類対象外'].forEach(value => {
+        [record.name || '.', record.ttl ?? '-', record.class || 'IN', record.type, data, record.classification || '分類対象外'].forEach(value => {
             const cell = document.createElement('td');
             cell.textContent = String(value);
             row.appendChild(cell);

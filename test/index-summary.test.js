@@ -127,9 +127,42 @@ test('グルー情報の箱は委任追跡ログの下に表示し、親サー�
     assert.equal(sections.length, 2);
     assert.match(getElementText(sections[1]), /ADDITIONAL SECTION は空/);
     const table = sections[0].children.find(element => element.className === 'glue-table');
-    const unsafeNameCell = table.children[1].children[3].children[0];
+    const unsafeNameCell = table.children[1].children.find(row =>
+        row.children[0].textContent === '<img src=x onerror=alert(1)>'
+    ).children[0];
     assert.equal(unsafeNameCell.textContent, '<img src=x onerror=alert(1)>');
     assert.equal(unsafeNameCell.innerHTML, '');
+});
+
+test('グルー情報は名前を最優先、内容を次の優先度で自然順にソートし、元の応答を変更しない', () => {
+    const { renderGlueInfo } = loadPageWithSearch();
+    const target = createElement();
+    const records = [
+        { name: 'ns10.example.com', type: 'A', data: '192.0.2.1' },
+        { name: 'NS2.Example.COM.', type: 'A', data: '192.0.2.10' },
+        { name: 'ns1.example.com', type: 'AAAA', data: '2001:db8::10' },
+        { name: 'ns2.example.com', type: 'A', data: '192.0.2.2' },
+        { name: 'ns1.example.com', type: 'AAAA', data: '2001:db8::2' },
+        { name: 'ns2.example.com.', type: 'A', data: '192.0.2.2', ttl: 60 },
+        { name: 'txt.example.com', type: 'TXT', data: { value: 'b' } },
+        { name: 'txt.example.com', type: 'TXT', data: { value: 'a' } }
+    ];
+    const original = structuredClone(records);
+    renderGlueInfo([], target, false, [], [{ server: '192.0.2.1', parentZone: 'com', records }]);
+    const section = target.children.find(element => element.className === 'glue-server');
+    const table = section.children.find(element => element.className === 'glue-table');
+    const rows = table.children[1].children;
+    assert.deepEqual(rows.map(row => [row.children[0].textContent, row.children[4].textContent]), [
+        ['ns1.example.com', '2001:db8::2'],
+        ['ns1.example.com', '2001:db8::10'],
+        ['ns2.example.com', '192.0.2.2'],
+        ['ns2.example.com.', '192.0.2.2'],
+        ['NS2.Example.COM.', '192.0.2.10'],
+        ['ns10.example.com', '192.0.2.1'],
+        ['txt.example.com', '{"value":"a"}'],
+        ['txt.example.com', '{"value":"b"}']
+    ]);
+    assert.deepEqual(records, original);
 });
 
 test('空の ADDITIONAL と取得不能を区別し、後続サーバーのレコードも表示する', () => {
