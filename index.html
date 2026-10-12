@@ -765,7 +765,7 @@ function renderGlueInfo(traceLog, target, parentDelegationUnavailable = false, z
 
     const note = document.createElement('p');
     note.className = 'glue-note';
-    note.textContent = '親の権威サーバーに問い合わせた結果をサーバー IP ごとに表示します（OPT は除外）。RFC 9499 の分類は各サーバーが返した委任先 NS に対応する A/AAAA レコードが対象です。なお、委任追跡の際にこれらの IP アドレスを必ず採用するということではありません。';
+    note.textContent = '親の権威サーバーに問い合わせた結果をサーバー IP アドレスごとに表示します（OPT は除外）。RFC 9499 の分類は各サーバーが返した委任先 NS に対応する A/AAAA レコードが対象です。なお、委任追跡の際にこれらの IP アドレスを必ず採用するということではありません。';
     target.appendChild(note);
 
     infos.forEach(info => {
