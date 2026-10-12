@@ -394,13 +394,19 @@
 
 <script>
 const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+const hasDomainParam = urlParams.has('domain');
 const initialDomain = urlParams.get('domain');
-if (initialDomain) {
+const savedDomain = hasDomainParam
+    ? ''
+    : normalizeUserDomain(localStorage.getItem('dns-delegation-check-domain') || '');
+if (hasDomainParam) {
     const normalizedInitialDomain = normalizeUserDomain(initialDomain);
     if (normalizedInitialDomain) {
         document.getElementById('domain').value = normalizedInitialDomain;
         startTrace();
     }
+} else if (savedDomain) {
+    document.getElementById('domain').value = savedDomain;
 }
 
 function normalizeUserDomain(value) {
@@ -438,6 +444,8 @@ async function startTrace() {
 
     if (!domain) return alert('ドメイン名を入力してください');
 
+    document.getElementById('domain').value = domain;
+    localStorage.setItem('dns-delegation-check-domain', domain);
     container.innerHTML = '<div style="text-align:center; color:#666; padding-top:40px;">DNS の委任関係、NS レコード、および Glue レコードを検証中...</div>';
 
     const controller = new AbortController();

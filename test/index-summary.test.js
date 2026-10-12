@@ -25,6 +25,12 @@ function loadBuildSummary() {
     const context = {
         URL,
         URLSearchParams,
+        localStorage: {
+            getItem() {
+                return null;
+            },
+            setItem() {}
+        },
         document: {
             createElement,
             getElementById(id) {
@@ -42,16 +48,26 @@ function loadBuildSummary() {
     };
 }
 
-function loadPageWithSearch(search = '', fetchImpl) {
+function loadPageWithSearch(search = '', fetchImpl, savedDomain = '') {
     const domainInput = createElement();
     const summaryPanel = createElement();
     const resultContainer = createElement();
+    const localStorageValues = new Map();
+    if (savedDomain) localStorageValues.set('dns-delegation-check-domain', savedDomain);
     const context = {
         URL,
         URLSearchParams,
         AbortController,
         setTimeout,
         clearTimeout,
+        localStorage: {
+            getItem(key) {
+                return localStorageValues.get(key) || null;
+            },
+            setItem(key, value) {
+                localStorageValues.set(key, value);
+            }
+        },
         fetch: fetchImpl || (async () => ({
             json: async () => ({
                 success: true,
@@ -79,6 +95,7 @@ function loadPageWithSearch(search = '', fetchImpl) {
         domainInput,
         summaryPanel,
         resultContainer,
+        localStorageValues,
         startTrace: context.startTrace,
         renderLogTree: context.renderLogTree,
         renderGlueInfo: context.renderGlueInfo,
@@ -247,6 +264,34 @@ test('domain クエリがあると自動で解析を開始する', async () => {
 
     await fetchPromise;
     assert.equal(fetchCalled, true);
+});
+
+test('domain クエリがなければ localStorage のドメインを復元し、解析時に保存する', async () => {
+    const { domainInput, startTrace, localStorageValues } = loadPageWithSearch('', async () => ({
+        json: async () => ({ success: true, zoneApexLog: [], traceLog: [{ status: 'SUCCESS' }] })
+    }), ' Saved.Example.COM. ');
+
+    assert.equal(domainInput.value, 'saved.example.com');
+    domainInput.value = ' New.Example.COM. ';
+    await startTrace();
+
+    assert.equal(domainInput.value, 'new.example.com');
+    assert.equal(localStorageValues.get('dns-delegation-check-domain'), 'new.example.com');
+});
+
+test('domain クエリは localStorage より優先される', async () => {
+    let requestDomain;
+    const { domainInput, localStorageValues } = loadPageWithSearch('?domain=query.example.com', async (_url, options) => {
+        requestDomain = JSON.parse(options.body).domain;
+        return {
+            json: async () => ({ success: true, zoneApexLog: [], traceLog: [{ status: 'SUCCESS' }] })
+        };
+    }, 'saved.example.com');
+
+    assert.equal(domainInput.value, 'query.example.com');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(requestDomain, 'query.example.com');
+    assert.equal(localStorageValues.get('dns-delegation-check-domain'), 'query.example.com');
 });
 
 test('ADDITIONAL の IP アドレス採用を委任ログの専用ボックスにだけ表示する', () => {
