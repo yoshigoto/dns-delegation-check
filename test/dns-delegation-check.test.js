@@ -189,7 +189,7 @@ test('ゾーン頂点探索は全親サーバーの ADDITIONAL と通信失敗�
     assert.deepEqual(infos[3].records.map(record => record.classification), ['sibling domain', 'unrelated']);
 });
 
-test('NS IP 未取得でも親サーバー別情報を保持し、対象外入力には祖先の情報を表示しない', async () => {
+test('NS の IP アドレス未取得でも親サーバー別情報を保持し、対象外入力には祖先の情報を表示しない', async () => {
     const dependencies = createZoneApexTestDependencies([
         { qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: referralResponse('com', 'ns.com', '192.0.2.2') },
         { qname: 'example.com', serverIp: '192.0.2.2', qType: 'NS', value: {
@@ -883,7 +883,7 @@ test('複数の委任先 NS は並列に問い合わせ、タイムアウト待�
     ]);
 });
 
-test('委任先の IP がない場合は追跡不能として記録する', async () => {
+test('委任先の IP アドレスがない場合は追跡不能として記録する', async () => {
     const result = await traceDomain(
         'child.example.com',
         ['192.0.2.10'],
@@ -966,7 +966,7 @@ test('委任追跡は Unrelated な ADDITIONAL アドレスを採用しない', 
                         additionals: [{ type: 'A', name: 'ns.jp', data: '192.0.2.2' }]
                     };
                 }
-                assert.equal(serverIp, '192.0.2.2', 'Unrelated な ADDITIONAL の IP に問い合わせてはいけません');
+                assert.equal(serverIp, '192.0.2.2', 'Unrelated な ADDITIONAL の IP アドレスに問い合わせてはいけません');
                 return {
                     flags: 0,
                     answers: [],
@@ -1047,7 +1047,7 @@ test('委任先の glue と権威 NS が一致すれば SUCCESS になる', asyn
     assert.deepEqual(result[0].fallbackAddressNotes, []);
 });
 
-test('Glue 比較では子ゾーン権威サーバーから得た NS の IP を再帰的名前解決より優先する', async () => {
+test('Glue 比較では子ゾーン権威サーバーから得た NS の IP アドレスを再帰的名前解決より優先する', async () => {
     const result = await traceDomain(
         'child.example.com',
         ['192.0.2.20'],
@@ -1082,7 +1082,7 @@ test('Glue 比較では子ゾーン権威サーバーから得た NS の IP を�
     assert.equal(result[0].glueMatch.success, true);
 });
 
-test('委任先の IP 不在と Glue の IP 不一致を検出する', async () => {
+test('委任先の IP アドレス不在と Glue の IP アドレス不一致を検出する', async () => {
     const noChildIP = await traceDomain(
         'child.example.com',
         ['192.0.2.20'],

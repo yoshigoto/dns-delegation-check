@@ -249,7 +249,7 @@ test('domain クエリがあると自動で解析を開始する', async () => {
     assert.equal(fetchCalled, true);
 });
 
-test('ADDITIONAL の IP 採用を委任ログの専用ボックスにだけ表示する', () => {
+test('ADDITIONAL の IP アドレス採用を委任ログの専用ボックスにだけ表示する', () => {
     const { renderLogTree } = loadPageWithSearch();
     const target = createElement();
     renderLogTree([
