@@ -372,10 +372,10 @@
 <div class="container">
     <h2>🌿 DNS委任チェッカー</h2>
 
-    <form class="input-form-container" onsubmit="event.preventDefault(); startTrace();">
+    <form id="trace-form" class="input-form-container">
         <div class="input-group">
             <label for="domain">調査するドメイン名</label>
-            <input type="text" id="domain" placeholder="example.com" onkeydown="checkEnter(event)" autofocus>
+            <input type="text" id="domain" placeholder="example.com" autofocus>
         </div>
         <button id="start-btn" class="btn-main" type="submit">解析スタート</button>
     </form>
@@ -393,6 +393,13 @@
 </footer>
 
 <script>
+// CSP で inline イベントハンドラを禁止しているため、スクリプト側で登録する。
+document.getElementById('trace-form')?.addEventListener?.('submit', event => {
+    event.preventDefault();
+    startTrace();
+});
+document.getElementById('domain')?.addEventListener?.('keydown', event => checkEnter(event));
+
 const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
 const hasDomainParam = urlParams.has('domain');
 const initialDomain = urlParams.get('domain');
@@ -467,7 +474,11 @@ async function startTrace() {
         const parentDelegationUnavailable = data.parentDelegationUnavailable === true;
 
         if (!data.success || (zoneApexLog.length === 0 && traceLog.length === 0)) {
-            container.innerHTML = '<div style="color:red; text-align:center; padding-top:40px;">データの取得に失敗しました。</div>';
+            container.innerHTML = '';
+            const message = document.createElement('div');
+            message.style.cssText = 'color:red; text-align:center; padding-top:40px;';
+            message.textContent = typeof data.error === 'string' && data.error ? data.error : 'データの取得に失敗しました。';
+            container.appendChild(message);
             return;
         }
 
@@ -523,6 +534,7 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
     const addressRecordFound = logData.some(item => item.status === 'ADDRESS_RECORD_FOUND');
     const noDelegationForQname = logData.some(item => item.status === 'NO_DELEGATION_FOR_QNAME');
     const zoneApexLookupTimedOut = logData.some(item => item.status === 'ZONE_APEX_LOOKUP_TIMEOUT');
+    const queryLimitExceeded = logData.some(item => item.status === 'QUERY_LIMIT_EXCEEDED');
     const colocatedDelegation = parentDelegationUnavailable;
     const isApexDetermined = apexName !== '未判定';
 
@@ -567,7 +579,9 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
     ];
 
     const verdict = document.createElement('div');
-    const verdictText = !isApexDetermined
+    const verdictText = queryLimitExceeded
+        ? '⚠️  要確認: DNS 問い合わせ数が上限に達したため、検査結果は不完全です'
+        : !isApexDetermined
         ? (cnameFound
             ? '⚠️  検査対象外: 入力名は CNAME (別名) なので、ゾーン名を指定してください'
             : dnameFound
@@ -592,6 +606,7 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
                 : '✅  正常: 正しく委任されています');
 
     verdict.className = `summary-verdict ${
+        queryLimitExceeded ||
         !isApexDetermined ||
         colocatedDelegation ||
         nameServerAddressFailures.length > 0 ||
@@ -676,7 +691,7 @@ function renderLogTree(logData, target) {
             if (node.status === 'SUCCESS') typeKey = 'SUCCESS';
             if (node.status === 'COLOCATED_DELEGATION') typeKey = 'COLOCATED';
             if (node.status && node.status.startsWith('LAME_DELEGATION')) typeKey = 'LAME';
-            if (node.status === 'ERROR' || node.status === 'NETWORK_ERROR' || node.status === 'ADDRESS_RECORD_FOUND' || node.status === 'NO_DELEGATION_FOR_QNAME' || node.status === 'ZONE_APEX_LOOKUP_TIMEOUT') typeKey = 'ERROR';
+            if (node.status === 'ERROR' || node.status === 'NETWORK_ERROR' || node.status === 'ADDRESS_RECORD_FOUND' || node.status === 'NO_DELEGATION_FOR_QNAME' || node.status === 'ZONE_APEX_LOOKUP_TIMEOUT' || node.status === 'QUERY_LIMIT_EXCEEDED') typeKey = 'ERROR';
 
             const itemBlock = document.createElement('div');
             itemBlock.className = 'server-item-block';
@@ -722,6 +737,13 @@ function renderLogTree(logData, target) {
                 fallbackDiv.className = 'fallback-address-box';
                 fallbackDiv.innerText = `IP アドレスの採用元:\rNS 名の名前解決に失敗したため、親の ADDITIONAL SECTION から採用しました。\r${node.fallbackAddressNotes.join('\r')}`;
                 itemBlock.appendChild(fallbackDiv);
+            }
+
+            if (Array.isArray(node.addressSelectionNotes) && node.addressSelectionNotes.length > 0) {
+                const addressSelectionDiv = document.createElement('div');
+                addressSelectionDiv.className = 'fallback-address-box';
+                addressSelectionDiv.innerText = `問い合わせ対象外の IP アドレス:\r${node.addressSelectionNotes.join('\r')}`;
+                itemBlock.appendChild(addressSelectionDiv);
             }
 
             if (node.nsMatch) {

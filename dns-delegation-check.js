@@ -1,4 +1,7 @@
 import express from 'express';
+import crypto from 'crypto';
+import fs from 'fs';
+import net from 'net';
 import path from 'path';
 import dnsPacket from 'dns-packet';	// https://github.com/mafintosh/dns-packet
 import { fileURLToPath } from 'url';
@@ -13,10 +16,129 @@ import {
 } from 'dns-self-resolver';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// 1 リクエストあたりの DNS 問い合わせ数の上限 (一般的なドメインは 50〜150 件程度)。
+const MAX_QUERIES_PER_TRACE = 1000;
+// 1 つの referral から追跡する NS アドレス数の上限。
+const MAX_NS_ADDRESSES_PER_REFERRAL = 32;
+const MAX_CONCURRENT_TRACES = 8;
+const MAX_CONCURRENT_TRACES_PER_CLIENT = 2;
+const RATE_LIMIT_WINDOW_MS = 60000;
+const RATE_LIMIT_MAX_REQUESTS_PER_CLIENT = 10;
+
+// IANA IPv4/IPv6 Special-Purpose Address Registry のうち、インターネット上の権威サーバーとして
+// 到達すべきでない範囲。内部ネットワークへの問い合わせ (SSRF) を防ぐ。
+const NON_PUBLIC_IPV4 = new net.BlockList();
+[
+    ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
+    ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
+    ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],
+    ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]
+].forEach(([address, prefix]) => NON_PUBLIC_IPV4.addSubnet(address, prefix, 'ipv4'));
+const GLOBAL_UNICAST_IPV6 = new net.BlockList();
+GLOBAL_UNICAST_IPV6.addSubnet('2000::', 3, 'ipv6');
+const NON_PUBLIC_IPV6 = new net.BlockList();
+[
+    ['2001::', 32], ['2001:2::', 48], ['2001:10::', 28], ['2001:20::', 28],
+    ['2001:db8::', 32], ['2002::', 16], ['3fff::', 20]
+].forEach(([address, prefix]) => NON_PUBLIC_IPV6.addSubnet(address, prefix, 'ipv6'));
+
+function isPublicServerIP(ip) {
+    const address = String(ip || '');
+    try {
+        switch (net.isIP(address)) {
+            case 4:
+                return !NON_PUBLIC_IPV4.check(address, 'ipv4');
+            case 6:
+                // IPv4-mapped (::ffff:0:0/96)、NAT64、ULA、リンクローカル等は 2000::/3 外のため拒否される。
+                return !address.includes('%') &&
+                    GLOBAL_UNICAST_IPV6.check(address, 'ipv6') &&
+                    !NON_PUBLIC_IPV6.check(address, 'ipv6');
+            default:
+                return false;
+        }
+    } catch {
+        return false;
+    }
+}
+
+const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+const inlineScriptHashes = [...indexHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+    .map(([, script]) => `'sha256-${crypto.createHash('sha256').update(script, 'utf8').digest('base64')}'`);
+const CONTENT_SECURITY_POLICY = [
+    "default-src 'none'",
+    `script-src ${inlineScriptHashes.join(' ') || "'none'"}`,
+    "style-src 'unsafe-inline'",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'"
+].join('; ');
+
 const app = express();
-app.use(express.json());
-app.use(express.static('public'));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.disable('x-powered-by');
+// nginx 等のローカルリバースプロキシ経由の X-Forwarded-For のみ信頼する。
+app.set('trust proxy', 'loopback');
+app.use((req, res, next) => {
+    res.set({
+        'Content-Security-Policy': CONTENT_SECURITY_POLICY,
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Referrer-Policy': 'no-referrer',
+        'Cross-Origin-Opener-Policy': 'same-origin',
+        'Cross-Origin-Resource-Policy': 'same-origin'
+    });
+    next();
+});
+app.use(express.json({ limit: '1kb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => res.type('html').send(indexHtml));
+
+const activeTracesByClient = new Map();
+const recentRequestsByClient = new Map();
+let activeTraceCount = 0;
+
+function pruneRateLimitEntries(now) {
+    for (const [client, timestamps] of recentRequestsByClient) {
+        const recent = timestamps.filter(timestamp => now - timestamp < RATE_LIMIT_WINDOW_MS);
+        if (recent.length > 0) recentRequestsByClient.set(client, recent);
+        else recentRequestsByClient.delete(client);
+    }
+}
+setInterval(() => pruneRateLimitEntries(Date.now()), RATE_LIMIT_WINDOW_MS).unref();
+
+function acquireTraceSlot(req, res) {
+    const client = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const recent = (recentRequestsByClient.get(client) || []).filter(timestamp => now - timestamp < RATE_LIMIT_WINDOW_MS);
+
+    if (recent.length >= RATE_LIMIT_MAX_REQUESTS_PER_CLIENT) {
+        res.set('Retry-After', String(Math.ceil((RATE_LIMIT_WINDOW_MS - (now - recent[0])) / 1000)));
+        res.status(429).json({ success: false, error: 'リクエストが多すぎます。しばらく待ってから再度お試しください。' });
+        return null;
+    }
+    if (activeTraceCount >= MAX_CONCURRENT_TRACES || (activeTracesByClient.get(client) || 0) >= MAX_CONCURRENT_TRACES_PER_CLIENT) {
+        res.set('Retry-After', '10');
+        res.status(503).json({ success: false, error: 'サーバーが混み合っています。しばらく待ってから再度お試しください。' });
+        return null;
+    }
+
+    recent.push(now);
+    recentRequestsByClient.set(client, recent);
+    activeTraceCount++;
+    activeTracesByClient.set(client, (activeTracesByClient.get(client) || 0) + 1);
+
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        activeTraceCount--;
+        const remaining = (activeTracesByClient.get(client) || 1) - 1;
+        if (remaining > 0) activeTracesByClient.set(client, remaining);
+        else activeTracesByClient.delete(client);
+    };
+}
 
 function normalizeUserDomain(value) {
     const raw = String(value || '').trim();
@@ -105,6 +227,18 @@ function buildGlueInfo(additionals, nsRecords, parentZone, server, serverName) {
     };
 }
 
+function buildAddressSelectionNotes(blockedServerIPs, truncatedServerIPs, serverNameMap) {
+    const formatIPs = ips => ips.map(ip => serverNameMap[ip] ? `${serverNameMap[ip]}: ${ip}` : ip).join(', ');
+    const notes = [];
+    if (blockedServerIPs.length > 0) {
+        notes.push(`[${formatIPs(blockedServerIPs)}] はグローバルユニキャストアドレスではないため、問い合わせを行いません。`);
+    }
+    if (truncatedServerIPs.length > 0) {
+        notes.push(`NS の IP アドレスが上限 (${MAX_NS_ADDRESSES_PER_REFERRAL}) を超えたため、[${formatIPs(truncatedServerIPs)}] は追跡しません。`);
+    }
+    return notes.length > 0 ? { addressSelectionNotes: notes } : {};
+}
+
 async function resolveAuthoritativeServerIPs(name, serverIp, dnsResponseCache, queryUDP) {
     const responses = await Promise.all(['A', 'AAAA'].map(async type =>
         queryUDP(name, serverIp, dnsResponseCache, type)
@@ -124,17 +258,64 @@ function getMinimizedQnames(domain) {
     return labels.map((_, index) => labels.slice(index).join('.')).reverse();
 }
 
+function getServerAddressPolicy(dependencies) {
+    if (typeof dependencies.isAllowedServerIP === 'function') return dependencies.isAllowedServerIP;
+    // 宛先制限は実ネットワークへ送信する既定トランスポートに適用する (テスト用モック等は対象外)。
+    return dependencies.queryDirectlyUDP ? () => true : isPublicServerIP;
+}
+
 function createQueryFunction(dependencies) {
     const query = dependencies.queryDirectlyUDP || queryDirectlyUDP;
-    if (!dependencies.signal) return query;
-    return (name, serverIp, cache, qType, options = {}) =>
-        query(name, serverIp, cache, qType, { ...options, signal: dependencies.signal });
+    const isAllowedServerIP = getServerAddressPolicy(dependencies);
+    const budget = dependencies.queryBudget;
+    return (name, serverIp, cache, qType, options) => {
+        if (!isAllowedServerIP(serverIp)) {
+            return Promise.resolve({
+                error: 'BLOCKED_ADDRESS', domain: name, serverIp, qType, retryable: false,
+                detail: `${serverIp} はグローバルユニキャストアドレスではないため、問い合わせを行いません。`
+            });
+        }
+        if (budget) {
+            if (budget.remaining <= 0) {
+                budget.exhausted = true;
+                return Promise.resolve({
+                    error: 'QUERY_LIMIT_EXCEEDED', domain: name, serverIp, qType, retryable: false,
+                    detail: `1 回の検査で実行できる DNS 問い合わせ数の上限 (${MAX_QUERIES_PER_TRACE}) に達しました。`
+                });
+            }
+            budget.remaining--;
+        }
+        return dependencies.signal
+            ? query(name, serverIp, cache, qType, { ...(options || {}), signal: dependencies.signal })
+            : query(name, serverIp, cache, qType, options);
+    };
+}
+
+function isQueryBudgetExhausted(dependencies) {
+    return !!dependencies.queryBudget && dependencies.queryBudget.remaining <= 0;
+}
+
+function createResolverDependencies(dependencies, dnsResponseCache, queryUDP) {
+    return { ...dependencies, dnsResponseCache, queryDirectlyUDP: queryUDP };
+}
+
+// 宛先として許可されない NS アドレスを除外し、1 referral あたりの追跡数を制限する。
+function selectServerIPs(ips, dependencies) {
+    const isAllowedServerIP = getServerAddressPolicy(dependencies);
+    const uniqueIPs = [...new Set(ips)];
+    const blocked = uniqueIPs.filter(ip => !isAllowedServerIP(ip));
+    const allowed = uniqueIPs.filter(ip => isAllowedServerIP(ip));
+    return {
+        allowed: allowed.slice(0, MAX_NS_ADDRESSES_PER_REFERRAL),
+        blocked,
+        truncated: allowed.slice(MAX_NS_ADDRESSES_PER_REFERRAL)
+    };
 }
 
 async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
     const resolveIPs = dependencies.resolveServerIPs || resolveServerIPs;
     const queryUDP = createQueryFunction(dependencies);
-    const resolverDependencies = { ...dependencies, dnsResponseCache };
+    const resolverDependencies = createResolverDependencies(dependencies, dnsResponseCache, queryUDP);
     let currentNs = 'a.root-servers.net';
     let currentZone = '';
     let currentServerIPs = await resolveIPs(currentNs, resolverDependencies);
@@ -189,7 +370,8 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
 
         for (const { serverIp, res } of serverResponses) {
             if (res.error) {
-                pushExplorationLog('NETWORK_ERROR', `ゾーン頂点探索中のエラー (${serverIp}): ${res.error}${res.detail ? ' - ' + res.detail : ''}`, currentNs, currentParent, { parentLogId: currentParentLogId });
+                const status = res.error === 'QUERY_LIMIT_EXCEEDED' ? 'QUERY_LIMIT_EXCEEDED' : 'NETWORK_ERROR';
+                pushExplorationLog(status, `ゾーン頂点探索中のエラー (${serverIp}): ${res.error}${res.detail ? ' - ' + res.detail : ''}`, currentNs, currentParent, { parentLogId: currentParentLogId });
                 continue;
             }
 
@@ -306,7 +488,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         const resolvedIPsByName = nsNamesNeedingResolution.length > 0
             ? await Promise.all(nsNamesNeedingResolution.map(async nsName => ({
                 nsName,
-                ips: await resolveIPs(nsName, resolverDependencies)
+                ips: isQueryBudgetExhausted(dependencies) ? null : await resolveIPs(nsName, resolverDependencies)
             })))
             : [];
         resolvedIPsByName.forEach(({ nsName, ips }) => {
@@ -314,7 +496,8 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
                 if (!nextServerNameMap[serverIp]) nextServerNameMap[serverIp] = nsName;
             });
         });
-        const nextServerIPs = [...new Set([...glueIPs, ...resolvedIPsByName.flatMap(({ ips }) => (ips || []).filter(Boolean))])];
+        const candidateServerIPs = [...new Set([...glueIPs, ...resolvedIPsByName.flatMap(({ ips }) => (ips || []).filter(Boolean))])];
+        const { allowed: nextServerIPs, blocked: blockedServerIPs, truncated: truncatedServerIPs } = selectServerIPs(candidateServerIPs, dependencies);
         const unresolvedNsNames = resolvedIPsByName
             .filter(({ ips }) => !ips || ips.length === 0)
             .map(({ nsName }) => nsName);
@@ -343,9 +526,21 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             glueIPs,
             glueInfo: buildGlueInfo(delegation.additionals, delegation.nsRecords, currentZone, delegation.serverIp, currentServerNameMap[delegation.serverIp] || currentNs),
             fallbackAddressNotes: [],
+            ...buildAddressSelectionNotes(blockedServerIPs, truncatedServerIPs, nextServerNameMap),
             rfc9471: summarizeRfc9471Referral(delegation.nsRecords, delegation.additionals, '', currentZone),
             nsResolutionWarning: unresolvedNsNames.length > 0 ? { names: unresolvedNsNames } : null
         });
+
+        if (nextServerIPs.length === 0 && blockedServerIPs.length > 0) {
+            pushExplorationLog(
+                'LAME_DELEGATION_NON_PUBLIC_ADDRESS',
+                `委任先 NS レコード (${nextNsNames.join(', ')}) の IP アドレス [${blockedServerIPs.join(', ')}] はグローバルユニキャストアドレスではないため、ゾーン頂点を確認できません。`,
+                currentNs,
+                currentParent
+            );
+            hasZoneApexLookupFailure = true;
+            break;
+        }
 
         if (nextServerIPs.length === 0) {
             pushExplorationLog(
@@ -427,7 +622,7 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
 async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, currentDepth = 1, expectedNSList = [], parentGlueMap = {}, dependencies = {}, serverNameMap = {}, currentZone = '', visitedServerIPs = []) {
     const resolveIPs = dependencies.resolveServerIPs || resolveServerIPs;
     const queryUDP = createQueryFunction(dependencies);
-    const resolverDependencies = { ...dependencies, dnsResponseCache };
+    const resolverDependencies = createResolverDependencies(dependencies, dnsResponseCache, queryUDP);
     let results = [];
     if (currentDepth > 10) {
         results.push({
@@ -468,9 +663,23 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             return results;
         }
 
-        if (res.error === 'SEND_ERROR' || res.error === 'SOCKET_ERROR' || res.error === 'DECODE_ERROR') {
+        if (res.error === 'BLOCKED_ADDRESS') {
+            logEntry.status = 'LAME_DELEGATION_NON_PUBLIC_ADDRESS';
+            logEntry.detail = res.detail;
+            results.push(logEntry);
+            return results;
+        }
+
+        if (res.error === 'QUERY_LIMIT_EXCEEDED') {
+            logEntry.status = 'QUERY_LIMIT_EXCEEDED';
+            logEntry.detail = res.detail;
+            results.push(logEntry);
+            return results;
+        }
+
+        if (res.error) {
             logEntry.status = 'NETWORK_ERROR';
-            logEntry.detail = `エラー: ${res.detail}`;
+            logEntry.detail = `エラー: ${res.detail || res.error}`;
             results.push(logEntry);
             return results;
         }
@@ -597,7 +806,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                     if (!nextServerNameMap[g.data]) nextServerNameMap[g.data] = nsKey;
                 });
 
-                if (matchedGlues.length === 0) {
+                if (matchedGlues.length === 0 && !isQueryBudgetExhausted(dependencies)) {
                     const resolvedIPs = await resolveIPs(ns.data, resolverDependencies);
                     (resolvedIPs || []).filter(Boolean).forEach(ip => {
                         nextServerIPs.push(ip);
@@ -607,7 +816,20 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             }
 
             logEntry.fallbackAddressNotes = [];
-            nextServerIPs = [...new Set(nextServerIPs)];
+            const { allowed: allowedServerIPs, blocked: blockedServerIPs, truncated: truncatedServerIPs } = selectServerIPs(nextServerIPs, dependencies);
+            Object.assign(logEntry, buildAddressSelectionNotes([], truncatedServerIPs, nextServerNameMap));
+            for (const blockedServerIp of blockedServerIPs) {
+                results.push({
+                    server: blockedServerIp,
+                    serverName: nextServerNameMap[blockedServerIp] || '',
+                    parent: serverIp,
+                    status: 'LAME_DELEGATION_NON_PUBLIC_ADDRESS',
+                    detail: `委任先 NS の IP アドレス (${blockedServerIp}) はグローバルユニキャストアドレスではないため、問い合わせを行いません。`,
+                    nsMatch: null,
+                    glueMatch: null
+                });
+            }
+            nextServerIPs = allowedServerIPs;
 
             if (nextServerIPs.length > 0) {
                 const visitedDestinations = nextServerIPs.filter(nextServerIp => visitedOnPath.has(nextServerIp));
@@ -636,7 +858,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                     const childResults = await traceDomain(domain, childServerIPs, dnsResponseCache, serverIp, currentDepth + 1, currentNSNames, nextGlueMap, dependencies, nextServerNameMap, delegatedZone, [...visitedServerIPs, serverIp]);
                     results = results.concat(childResults);
                 }
-            } else {
+            } else if (blockedServerIPs.length === 0) {
                 results.push({
                     server: currentNSNames.join(', '), parent: serverIp, status: 'LAME_DELEGATION_NO_NS_IP_ADDRESS',
                     detail: `委任先 NS レコード (${currentNSNames.join(', ')}) の IP アドレスを取得できないため、追跡を継続できません。`
@@ -653,10 +875,13 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
 }
 
 app.post('/api/trace', async (req, res) => {
-    const domain = normalizeUserDomain(req.body?.domain);
+    const domain = typeof req.body?.domain === 'string' ? normalizeUserDomain(req.body.domain) : '';
     if (!domain) {
         return res.status(400).json({ error: 'ドメイン名を入力してください' });
     }
+
+    const releaseTraceSlot = acquireTraceSlot(req, res);
+    if (!releaseTraceSlot) return;
 
     const dnsResponseCache = new Map();
     const abortController = new AbortController();
@@ -665,10 +890,15 @@ app.post('/api/trace', async (req, res) => {
     };
     res.once('close', abortOnResponseClose);
     let zoneApexTimer;
+    const traceDependencies = {
+        signal: abortController.signal,
+        isAllowedServerIP: isPublicServerIP,
+        queryBudget: { remaining: MAX_QUERIES_PER_TRACE, exhausted: false }
+    };
 
     try {
         const zoneApexInfo = await Promise.race([
-            getZoneApex(domain, dnsResponseCache, { signal: abortController.signal }),
+            getZoneApex(domain, dnsResponseCache, traceDependencies),
             new Promise(resolve => {
                 zoneApexTimer = setTimeout(() => {
                     abortController.abort();
@@ -695,9 +925,9 @@ app.post('/api/trace', async (req, res) => {
         if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && !zoneApexInfo.parentDelegationUnavailable) {
             const serverList = zoneApexInfo.parentServerIPs.length > 0
                 ? zoneApexInfo.parentServerIPs
-                : await resolveServerIPs('a.root-servers.net', { dnsResponseCache, signal: abortController.signal });
+                : await resolveServerIPs('a.root-servers.net', createResolverDependencies(traceDependencies, dnsResponseCache, createQueryFunction(traceDependencies))) || [];
             const serverNameMap = zoneApexInfo.parentServerNameMap || Object.fromEntries(serverList.map(serverIp => [serverIp, zoneApexInfo.parentNs || 'a.root-servers.net']));
-            traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {}, { signal: abortController.signal }, serverNameMap, zoneApexInfo.parentZone || '');
+            traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {}, traceDependencies, serverNameMap, zoneApexInfo.parentZone || '');
         } else if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && zoneApexInfo.parentDelegationUnavailable) {
             const dsConfirmation = zoneApexInfo.colocatedDelegation?.dsConfirmsDelegation
                 ? ' DS レコードによりゾーンカットの存在は確認しました。'
@@ -712,6 +942,17 @@ app.post('/api/trace', async (req, res) => {
             }];
         }
 
+        if (traceDependencies.queryBudget.exhausted) {
+            traceLog.push({
+                server: '',
+                parent: null,
+                status: 'QUERY_LIMIT_EXCEEDED',
+                detail: `DNS 問い合わせ数が上限 (${MAX_QUERIES_PER_TRACE}) に達したため、検査を途中で打ち切りました。結果は不完全です。`,
+                nsMatch: null,
+                glueMatch: null
+            });
+        }
+
         res.json({
             success: true,
             parentDelegationUnavailable: zoneApexInfo.parentDelegationUnavailable === true,
@@ -720,11 +961,21 @@ app.post('/api/trace', async (req, res) => {
             traceLog: [...traceLog]
         });
     } catch (error) {
-        if (!res.destroyed) res.status(500).json({ success: false, error: error.message });
+        console.error(`[trace] ${domain}:`, error);
+        if (!res.destroyed && !res.headersSent) res.status(500).json({ success: false, error: '内部エラーが発生しました。' });
     } finally {
         clearTimeout(zoneApexTimer);
         res.off('close', abortOnResponseClose);
+        releaseTraceSlot();
     }
+});
+
+// 不正な JSON 等でスタックトレースを含む既定のエラーページを返さない。
+app.use((error, req, res, next) => {
+    if (res.headersSent) return next(error);
+    const status = Number.isInteger(error?.status) && error.status >= 400 && error.status < 500 ? error.status : 500;
+    if (status === 500) console.error('[http]', error);
+    res.status(status).json({ success: false, error: status === 500 ? '内部エラーが発生しました。' : '不正なリクエストです。' });
 });
 
 const HOST = '127.0.0.1';
@@ -742,6 +993,7 @@ export {
     hasParentChildRelationship,
     isInBailiwickGlue,
     isIPv6,
+    isPublicServerIP,
     getZoneApex,
     normalizeDnsName,
     normalizeUserDomain,

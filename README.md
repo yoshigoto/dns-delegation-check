@@ -143,7 +143,7 @@ location / {
 npm test
 ```
 
-テストは `test/dns-delegation-check.test.js` と `test/index-summary.test.js` にあります。DNS サーバーへ実際に問い合わせる処理は、固定したモック応答に差し替えて評価します。実際の外部 DNS やネットワークの状態には依存しません。
+テストは `test/dns-delegation-check.test.js`、`test/index-summary.test.js`、`test/security.test.js` にあります。DNS サーバーへ実際に問い合わせる処理は、固定したモック応答に差し替えて評価します。実際の外部 DNS やネットワークの状態には依存しません。
 
 ## 使い方
 
@@ -182,7 +182,15 @@ Content-Type: application/json
 }
 ```
 
-ドメインが不正な場合は HTTP 400、サーバー内部でエラーが発生した場合は HTTP 500 を返します。
+ドメインが不正な場合は HTTP 400、リクエスト本文が 1 KB を超える場合は HTTP 413、同一クライアントからのリクエストが 1 分間に 10 回を超えた場合は HTTP 429、同時実行数の上限 (全体 8 件、同一クライアント 2 件) に達した場合は HTTP 503、サーバー内部でエラーが発生した場合は HTTP 500 を返します。エラー時の本文は `{"success": false, "error": "..."}` 形式で、内部のエラー詳細は含みません。
+
+## セキュリティ対策
+
+- **内部ネットワークへの問い合わせ防止 (SSRF 対策)**: 委任先 NS の IP アドレス (glue および名前解決結果) がループバック、プライベート、リンクローカル、CGNAT、ULA、IPv4-mapped IPv6、ドキュメント用、マルチキャスト等のグローバルユニキャストではないアドレスの場合は問い合わせを行わず、`LAME_DELEGATION_NON_PUBLIC_ADDRESS` として表示します。TCP フォールバックや NS 名の名前解決を含むすべての DNS 問い合わせに適用されます。
+- **問い合わせ数の制限**: 1 回の検査あたりの DNS 問い合わせは 1000 件まで、1 つの referral から追跡する NS アドレスは 32 件までです。上限に達した場合は `QUERY_LIMIT_EXCEEDED` を表示し、結果が不完全であることを示します。
+- **レート制限**: クライアントごとに 1 分間 10 回、同時 2 件まで、サーバー全体で同時 8 件までです。クライアントの判定には、ループバックのリバースプロキシ (nginx) から渡された `X-Forwarded-For` のみを使用します。
+- **HTTP セキュリティヘッダー**: `Content-Security-Policy` (インラインスクリプトはハッシュで許可し、inline イベントハンドラは使用しません)、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 等を付与し、`X-Powered-By` は返しません。
+- **XSS 対策**: DNS 応答由来の文字列はすべて `textContent` / `innerText` で表示します。
 
 ## 構成
 
