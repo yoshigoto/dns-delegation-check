@@ -365,16 +365,42 @@
         .site-footer a:hover {
             text-decoration: underline;
         }
+
+        .page-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .page-header h2 {
+            margin: 0;
+        }
+
+        .language-switch {
+            flex: 0 0 auto;
+            color: #2563eb;
+            font-size: 14px;
+            text-decoration: none;
+        }
+
+        .language-switch:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>🌿 DNS委任チェッカー</h2>
+    <header class="page-header">
+        <h2 id="page-title">🌿 DNS委任チェッカー</h2>
+        <a id="language-switch" class="language-switch" href="/en/">English</a>
+    </header>
 
     <form id="trace-form" class="input-form-container">
         <div class="input-group">
-            <label for="domain">調査するドメイン名</label>
+            <label id="domain-label" for="domain">調査するドメイン名</label>
             <input type="text" id="domain" placeholder="example.com" autofocus>
         </div>
         <button id="start-btn" class="btn-main" type="submit">解析スタート</button>
@@ -382,17 +408,58 @@
 
     <div id="summary-panel" class="summary-panel"></div>
     <div id="result-container" class="result-container">
-        <div style="color: #666; text-align: center; padding-top: 40px;">ドメイン名を入力して解析をスタートしてください。</div>
-        <div style="color: #666; text-align: center; padding-top: 40px;">※委任チェッカーという性格上、ルートや TLD には対応していません。</div>
+        <div id="initial-prompt" style="color: #666; text-align: center; padding-top: 40px;">ドメイン名を入力して解析をスタートしてください。</div>
+        <div id="initial-note" style="color: #666; text-align: center; padding-top: 40px;">※委任チェッカーという性格上、ルートや TLD には対応していません。</div>
     </div>
 </div>
 
 <footer class="site-footer">
     © 2026 <a href="https://x.com/goto_ipv6" target="_blank" rel="noopener noreferrer">Y.Goto</a><br>
-    本ツールは検証・評価目的で提供されています。
+    <span id="footer-note">本ツールは検証・評価目的で提供されています。</span>
 </footer>
 
 <script>
+const isEnglish = document.documentElement?.lang === 'en';
+const languageSwitch = document.getElementById('language-switch');
+const domainInput = document.getElementById('domain');
+
+function getLanguageSwitchUrl() {
+    const currentPath = window.location.pathname;
+    const targetPath = isEnglish
+        ? currentPath.replace(/en\/?$/, '') || '/'
+        : `${currentPath.endsWith('/') ? currentPath : `${currentPath}/`}en/`;
+    const targetUrl = new URL(targetPath, window.location.origin);
+    const params = new URLSearchParams(window.location.search);
+    const domain = normalizeUserDomain(domainInput.value);
+    if (domain) params.set('domain', domain);
+    targetUrl.search = params.toString();
+    return targetUrl.href;
+}
+
+if (typeof languageSwitch?.addEventListener === 'function') {
+    languageSwitch.textContent = isEnglish ? '日本語' : 'English';
+    languageSwitch.addEventListener('click', event => {
+        event.preventDefault();
+        window.location.href = getLanguageSwitchUrl();
+    });
+}
+
+if (isEnglish) {
+    document.title = 'DNS Delegation Checker';
+    const englishLabels = {
+        'page-title': '🌿 DNS Delegation Checker',
+        'domain-label': 'Domain name to check',
+        'start-btn': 'Start check',
+        'initial-prompt': 'Enter a domain name and start the check.',
+        'initial-note': 'Note: Root and TLD zones are not supported.',
+        'footer-note': 'This tool is provided for testing and evaluation purposes.'
+    };
+    Object.entries(englishLabels).forEach(([id, value]) => {
+        const element = document.getElementById(id);
+        if (element) element.textContent = value;
+    });
+}
+
 // CSP で inline イベントハンドラを禁止しているため、スクリプト側で登録する。
 document.getElementById('trace-form')?.addEventListener?.('submit', event => {
     event.preventDefault();
@@ -446,20 +513,22 @@ function checkEnter(event) {
 }
 
 async function startTrace() {
-    let domain = normalizeUserDomain(document.getElementById('domain').value);
+    let domain = normalizeUserDomain(domainInput.value);
     const container = document.getElementById('result-container');
 
-    if (!domain) return alert('ドメイン名を入力してください');
+    if (!domain) return alert(isEnglish ? 'Please enter a domain name.' : 'ドメイン名を入力してください');
 
-    document.getElementById('domain').value = domain;
+    domainInput.value = domain;
     localStorage.setItem('dns-delegation-check-domain', domain);
-    container.innerHTML = '<div style="text-align:center; color:#666; padding-top:40px;">DNS の委任関係、NS レコード、および Glue レコードを検証中...</div>';
+    container.innerHTML = `<div style="text-align:center; color:#666; padding-top:40px;">${isEnglish
+        ? 'Checking DNS delegation, NS records, and glue records...'
+        : 'DNS の委任関係、NS レコード、および Glue レコードを検証中...'}</div>`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000);
 
     try {
-        const response = await fetch('./api/trace', {
+        const response = await fetch(isEnglish ? '../api/trace' : './api/trace', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ domain }),
@@ -477,7 +546,9 @@ async function startTrace() {
             container.innerHTML = '';
             const message = document.createElement('div');
             message.style.cssText = 'color:red; text-align:center; padding-top:40px;';
-            message.textContent = typeof data.error === 'string' && data.error ? data.error : 'データの取得に失敗しました。';
+            message.textContent = typeof data.error === 'string' && data.error
+                ? (isEnglish ? translateDetail(data.error) : data.error)
+                : (isEnglish ? 'Failed to retrieve data.' : 'データの取得に失敗しました。');
             container.appendChild(message);
             return;
         }
@@ -487,11 +558,109 @@ async function startTrace() {
     } catch (e) {
         clearTimeout(timeoutId);
         if (e.name === 'AbortError') {
-            container.innerHTML = '<div style="color:red; text-align:center; padding-top:40px;">解析がタイムアウトしました（120秒を超えました）。</div>';
+            container.innerHTML = `<div style="color:red; text-align:center; padding-top:40px;">${isEnglish
+                ? 'The check timed out (over 120 seconds).'
+                : '解析がタイムアウトしました（120秒を超えました）。'}</div>`;
         } else {
-            container.innerHTML = '<div style="color:red; text-align:center; padding-top:40px;">通信エラーが発生しました。Node.jsサーバー側を確認してください。</div>';
+            container.innerHTML = `<div style="color:red; text-align:center; padding-top:40px;">${isEnglish
+                ? 'A communication error occurred. Check the Node.js server.'
+                : '通信エラーが発生しました。Node.jsサーバー側を確認してください。'}</div>`;
         }
     }
+}
+
+function translateDetail(detail, status = '') {
+    if (!isEnglish || !detail) return detail;
+    const fixedTranslations = new Map([
+        ['リクエストが多すぎます。しばらく待ってから再度お試しください。', 'Too many requests. Please wait and try again.'],
+        ['サーバーが混み合っています。しばらく待ってから再度お試しください。', 'The server is busy. Please wait and try again.'],
+        ['内部エラーが発生しました。', 'An internal error occurred.'],
+        ['不正なリクエストです。', 'Invalid request.'],
+        ['ドメイン名を入力してください', 'Please enter a domain name.']
+    ]);
+    if (fixedTranslations.has(detail)) return fixedTranslations.get(detail);
+
+    if (detail.includes('ゾーン頂点を確定:')) {
+        const match = detail.match(/ゾーン頂点を確定:\s*([^\s。]+)/);
+        return match
+            ? `Zone apex identified: ${match[1]}. ${detail.includes('使用できません') ? 'Parent-zone delegation data is unavailable.' : 'Checking with the parent-zone delegation data.'}`
+            : 'Zone apex identified.';
+    }
+    if (detail.includes('示しました。')) {
+        const match = detail.match(/^(.+?) に対して (.+?) を示しました。 \((.+?)\)/);
+        if (match) return `${match[3]} referred ${match[1]} to ${match[2]}.`;
+    }
+    if (detail.startsWith('エラー: ')) return `Error: ${detail.slice('エラー: '.length)}`;
+
+    const statusTranslations = {
+        ZONE_APEX_LOOKUP_TIMEOUT: 'Zone apex discovery timed out. Check whether DNS servers are responding.',
+        QUERY_LIMIT_EXCEEDED: 'The DNS query limit was reached. The results may be incomplete.',
+        LAME_DELEGATION_MAX_DEPTH: 'The maximum delegation depth was reached; further tracing was stopped.',
+        LAME_DELEGATION_TIMEOUT: 'The server did not respond.',
+        LAME_DELEGATION_NO_ZONE: 'The server did not provide an authoritative response for the zone.',
+        LAME_DELEGATION_NO_AUTHORITY_NS: 'The authoritative server has no NS records in the AUTHORITY section.',
+        LAME_DELEGATION_NO_NS_IP_ADDRESS: 'Could not resolve an IP address for the delegated name server; tracing cannot continue.',
+        LAME_DELEGATION_NO_IP_ADDRESS: 'Could not resolve the name server IP address.',
+        LAME_DELEGATION_NON_PUBLIC_ADDRESS: 'The name server address is not globally routable, so no query was sent.',
+        LAME_DELEGATION_NOT_MATCH: 'The delegation information reported by the parent and child does not match.',
+        COLOCATED_DELEGATION: 'The parent and child zones are hosted by the same authoritative servers, so their delegation data cannot be compared.',
+        NETWORK_ERROR: 'A network or DNS response processing error occurred.',
+        CNAME_FOUND: 'The input name is a CNAME and is not eligible for delegation checks.',
+        DNAME_FOUND: 'A DNAME record prevents the zone apex from being determined.',
+        ADDRESS_RECORD_FOUND: 'The input name is a host with an A or AAAA record, not a zone apex.',
+        NO_DELEGATION_FOR_QNAME: 'No child-zone delegation was found. The input name is not a zone apex.',
+        SUCCESS: 'The delegation is correct.',
+        DELEGATED: 'The server returned NS records for the delegated zone.',
+        FOLLOW_DELEGATION: 'Following the delegation to the listed name servers.',
+        ZONE_APEX_FOUND: 'Zone apex identified.',
+        AUTHORITATIVE_NO_DELEGATION: 'The server returned an authoritative response with no child-zone delegation.',
+        UNEXPECTED_RESPONSE: 'The response did not identify a delegation.',
+        ERROR: 'An error occurred while checking DNS responses.',
+        Querying: 'Querying DNS server...'
+    };
+    if (statusTranslations[status]) return statusTranslations[status];
+    return detail;
+}
+
+function translateRfc9471(detail) {
+    if (!isEnglish || !detail) return detail;
+    return detail
+        .replace('UDP 応答は TC=1 のため TCP で再取得しました。', 'The UDP response was truncated (TC=1); retried over TCP.')
+        .replace('UDP 応答は TC=0 でした。', 'The UDP response was not truncated (TC=0).')
+        .replace('in-domain NS はありません。', 'There are no in-domain name servers.')
+        .replace('ADDITIONAL SECTION に存在しない in-domain NS', 'In-domain name servers missing from the ADDITIONAL SECTION')
+        .replace('は、親ゾーンで利用可能な glue が存在するかは応答だけでは判定できません。', ': the response alone cannot determine whether glue is available in the parent zone.')
+        .replace(' は sibling glue ですが、本ツールの動作モードが strict glue のため採用せず、名前解決を行います。', ' is sibling glue. It is not used in strict-glue mode; the name is resolved instead.')
+        .replace(' は RFC 9499 では unrelated に分類されるため、偽装アドレスを使わせる攻撃への対策として採用せず、名前解決を行います。', ' is classified as unrelated by RFC 9499. To prevent attacks using forged addresses, it is not used; the name is resolved instead.')
+        .replace('ADDITIONAL SECTION の', 'In the ADDITIONAL SECTION,')
+        .replace('in-domain glue:', 'In-domain glue:');
+}
+
+function translateMatchMessage(message) {
+    if (!isEnglish || !message) return message;
+    return message
+        .replace('✅ NS 情報一致！', '✅ NS records match.')
+        .replace('⚠️ NS 情報不一致！', '⚠️ NS records do not match.')
+        .replace('委任情報:', 'Delegation records:')
+        .replace('親が保持する委任情報:', 'Delegation records at the parent:')
+        .replace('子が保持する NS 情報:', 'NS records at the child:')
+        .replace(' (NS レコードが存在しません)', ' (no NS records found)')
+        .replace('✅ IP アドレス一致！', '✅ IP addresses match.')
+        .replace('⚠️ IP アドレス不一致！', '⚠️ IP addresses do not match.')
+        .replace('子の IP アドレス:', 'IP addresses at the child:')
+        .replace('親が保持する子情報:', 'Child address data at the parent:')
+        .replace('IP アドレスを得られませんでした。', 'Could not obtain the IP address.')
+        .replace('【', '[').replace('】', ']')
+        .replace(' (キャッシュ再利用)', ' (cached)');
+}
+
+function translateAddressSelectionNote(note) {
+    if (!isEnglish || !note) return note;
+    const blockedMatch = note.match(/^\[(.+)\] はグローバルユニキャストアドレスではないため、問い合わせを行いません。$/);
+    if (blockedMatch) return `[${blockedMatch[1]}] are not globally routable addresses and will not be queried.`;
+    const limitMatch = note.match(/^NS の IP アドレスが上限 \((\d+)\) を超えたため、\[(.+)\] は追跡しません。$/);
+    if (limitMatch) return `The name server IP address limit (${limitMatch[1]}) was exceeded; [${limitMatch[2]}] will not be traced.`;
+    return note;
 }
 
 function isNameServerAddressResolutionFailure(item) {
@@ -521,7 +690,7 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
     const rootInfo = logData.find(item => item.status === 'INFO') || logData.find(item => item.detail && item.detail.includes('ゾーン頂点を確定')) || logData[0];
     const apexMatch = rootInfo?.detail?.match(/ゾーン頂点を確定:\s*([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*)/i) ||
         rootInfo?.detail?.match(/ゾーン頂点は\s*([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*)/i);
-    const apexName = apexMatch ? apexMatch[1] : '未判定';
+    const apexName = apexMatch ? apexMatch[1] : (isEnglish ? 'Undetermined' : '未判定');
     const failureEntries = logData.filter(item => item.status && item.status.startsWith('LAME_DELEGATION'));
     const delegationNetworkErrors = delegationLogData.filter(item => item.status === 'NETWORK_ERROR');
     const nameServerAddressFailures = logData.filter(isNameServerAddressResolutionFailure);
@@ -536,17 +705,17 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
     const zoneApexLookupTimedOut = logData.some(item => item.status === 'ZONE_APEX_LOOKUP_TIMEOUT');
     const queryLimitExceeded = logData.some(item => item.status === 'QUERY_LIMIT_EXCEEDED');
     const colocatedDelegation = parentDelegationUnavailable;
-    const isApexDetermined = apexName !== '未判定';
+    const isApexDetermined = apexName !== '未判定' && apexName !== 'Undetermined';
 
     const summaryItems = [
         {
-            label: 'ゾーン頂点',
+            label: isEnglish ? 'Zone apex' : 'ゾーン頂点',
             value: apexName,
             tone: 'info'
         },
         {
-            label: '正常な委任',
-            value: `${successCount} 件`,
+            label: isEnglish ? 'Successful delegations' : '正常な委任',
+            value: isEnglish ? String(successCount) : `${successCount} 件`,
             tone: successCount > 0 ? 'success' : 'info'
         },
         /*{
@@ -555,31 +724,63 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
             tone: colocatedDelegation ? 'warning' : 'success'
         },*/
         {
-            label: '異常検出',
-            value: failureEntries.length > 0 ? `${failureEntries.length} 件の委任異常` : 'なし',
+            label: isEnglish ? 'Delegation issues' : '異常検出',
+            value: failureEntries.length > 0
+                ? (isEnglish ? `${failureEntries.length} issue(s)` : `${failureEntries.length} 件の委任異常`)
+                : (isEnglish ? 'None' : 'なし'),
             tone: failureEntries.length > 0 || maxDepthCount > 0 || missingAuthorityNsCount > 0 ? 'warning' : 'success'
         },
         {
-            label: 'NS の IP アドレス未取得',
-            value: nameServerAddressFailures.length > 0 ? `${nameServerAddressFailures.length} 件` : 'なし',
+            label: isEnglish ? 'Name server IP unavailable' : 'NS の IP アドレス未取得',
+            value: nameServerAddressFailures.length > 0
+                ? (isEnglish ? String(nameServerAddressFailures.length) : `${nameServerAddressFailures.length} 件`)
+                : (isEnglish ? 'None' : 'なし'),
             tone: nameServerAddressFailures.length > 0 ? 'warning' : 'success'
         },
         {
-            label: '一部 NS 名前解決失敗',
+            label: isEnglish ? 'Some name servers failed to resolve' : '一部 NS 名前解決失敗',
             value: partialNsResolutionWarnings.length > 0
                 ? partialNsResolutionWarnings.flatMap(item => item.nsResolutionWarning.names).join(', ')
-                : 'なし',
+                : (isEnglish ? 'None' : 'なし'),
             tone: partialNsResolutionWarnings.length > 0 ? 'warning' : 'success'
         },
         {
-            label: '通信エラー',
-            value: delegationNetworkErrors.length > 0 ? `${delegationNetworkErrors.length} 件` : 'なし',
+            label: isEnglish ? 'Network errors' : '通信エラー',
+            value: delegationNetworkErrors.length > 0
+                ? (isEnglish ? String(delegationNetworkErrors.length) : `${delegationNetworkErrors.length} 件`)
+                : (isEnglish ? 'None' : 'なし'),
             tone: delegationNetworkErrors.length > 0 ? 'warning' : 'success'
         }
     ];
 
     const verdict = document.createElement('div');
-    const verdictText = queryLimitExceeded
+    const verdictText = isEnglish
+        ? queryLimitExceeded
+            ? '⚠️ Review needed: The DNS query limit was reached; results are incomplete.'
+            : !isApexDetermined
+                ? (cnameFound
+                    ? '⚠️ Not checked: The input is a CNAME. Enter a zone name.'
+                    : dnameFound
+                        ? '⚠️ Not checked: A DNAME record prevents delegation checks.'
+                        : addressRecordFound
+                            ? '⚠️ Not checked: The input is a host with an A/AAAA record. Enter a zone name.'
+                            : noDelegationForQname
+                                ? '⚠️ Not checked: The input is not a zone apex.'
+                                : zoneApexLookupTimedOut
+                                    ? '⚠️ Review needed: Zone apex discovery timed out.'
+                                    : delegationNetworkErrors.length > 0
+                                        ? '⚠️ Review needed: A network error prevented delegation checks.'
+                                        : '⚠️ Review needed: Could not determine the zone apex.')
+                : (colocatedDelegation
+                    ? '⚠️ Not checked: The parent and child zones use the same authoritative servers; NS records were not compared.'
+                    : nameServerAddressFailures.length > 0
+                        ? '⚠️ Review needed: Could not resolve an authoritative server address.'
+                        : failureEntries.length > 0 || maxDepthCount > 0 || missingAuthorityNsCount > 0 || partialNsResolutionWarnings.length > 0
+                            ? '⚠️ Issues found: Delegation data does not match.'
+                            : delegationNetworkErrors.length > 0
+                                ? '⚠️ Review needed: A network error prevented delegation checks.'
+                                : '✅ Healthy: Delegation is configured correctly.')
+        : queryLimitExceeded
         ? '⚠️  要確認: DNS 問い合わせ数が上限に達したため、検査結果は不完全です'
         : !isApexDetermined
         ? (cnameFound
@@ -623,7 +824,7 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
 
     const title = document.createElement('div');
     title.className = 'summary-title';
-    title.textContent = 'DNS委任の要点';
+    title.textContent = isEnglish ? 'DNS delegation summary' : 'DNS委任の要点';
 
     const grid = document.createElement('div');
     grid.className = 'summary-grid';
@@ -709,7 +910,7 @@ function renderLogTree(logData, target) {
 
             const serverDetail = document.createElement('span');
             serverDetail.className = 'server-detail';
-            serverDetail.textContent = node.detail;
+            serverDetail.textContent = translateDetail(node.detail, node.status);
 
             rowDiv.appendChild(serverIp);
             rowDiv.appendChild(serverStatus);
@@ -720,7 +921,7 @@ function renderLogTree(logData, target) {
             if (node.glueMatch) {
                 const glueMatchDiv = document.createElement('div');
                 glueMatchDiv.className = `glue-match-box ${node.glueMatch.success ? 'match-success' : 'match-fail'}`;
-                glueMatchDiv.innerText = node.glueMatch.msg;
+                glueMatchDiv.innerText = translateMatchMessage(node.glueMatch.msg);
                 itemBlock.appendChild(glueMatchDiv);
             }
 
@@ -728,35 +929,41 @@ function renderLogTree(logData, target) {
                 const rfc9471Div = document.createElement('div');
                 const classification = node.rfc9471.includes('採用しません') ? 'match-fail' : 'match-success';
                 rfc9471Div.className = `rfc9471-box ${classification}`;
-                rfc9471Div.innerText = `RFC 9471 / RFC 9499 確認結果:\r${node.rfc9471}`;
+                rfc9471Div.innerText = `${isEnglish ? 'RFC 9471 / RFC 9499 referral analysis:' : 'RFC 9471 / RFC 9499 確認結果:'}\r${translateRfc9471(node.rfc9471)}`;
                 itemBlock.appendChild(rfc9471Div);
             }
 
             if (node.fallbackAddressNotes && node.fallbackAddressNotes.length > 0) {
                 const fallbackDiv = document.createElement('div');
                 fallbackDiv.className = 'fallback-address-box';
-                fallbackDiv.innerText = `IP アドレスの採用元:\rNS 名の名前解決に失敗したため、親の ADDITIONAL SECTION から採用しました。\r${node.fallbackAddressNotes.join('\r')}`;
+                fallbackDiv.innerText = isEnglish
+                    ? `IP address source:\rUsed from the parent's ADDITIONAL SECTION because the NS name could not be resolved.\r${node.fallbackAddressNotes.join('\r')}`
+                    : `IP アドレスの採用元:\rNS 名の名前解決に失敗したため、親の ADDITIONAL SECTION から採用しました。\r${node.fallbackAddressNotes.join('\r')}`;
                 itemBlock.appendChild(fallbackDiv);
             }
 
             if (Array.isArray(node.addressSelectionNotes) && node.addressSelectionNotes.length > 0) {
                 const addressSelectionDiv = document.createElement('div');
                 addressSelectionDiv.className = 'fallback-address-box';
-                addressSelectionDiv.innerText = `問い合わせ対象外の IP アドレス:\r${node.addressSelectionNotes.join('\r')}`;
+                addressSelectionDiv.innerText = isEnglish
+                    ? `IP addresses excluded from queries:\r${node.addressSelectionNotes.map(translateAddressSelectionNote).join('\r')}`
+                    : `問い合わせ対象外の IP アドレス:\r${node.addressSelectionNotes.join('\r')}`;
                 itemBlock.appendChild(addressSelectionDiv);
             }
 
             if (node.nsMatch) {
                 const matchDiv = document.createElement('div');
                 matchDiv.className = `ns-match-box ${node.nsMatch.success ? 'match-success' : 'match-fail'}`;
-                matchDiv.innerText = node.nsMatch.msg;
+                matchDiv.innerText = translateMatchMessage(node.nsMatch.msg);
                 itemBlock.appendChild(matchDiv);
             }
 
             if (node.nsResolutionWarning && Array.isArray(node.nsResolutionWarning.names) && node.nsResolutionWarning.names.length > 0) {
                 const warningDiv = document.createElement('div');
                 warningDiv.className = 'ns-match-box match-fail';
-                warningDiv.innerText = `⚠️ 委任先 NS (${node.nsResolutionWarning.names.join(', ')}) の名前解決に失敗しました。他の NS で追跡を継続します。`;
+                warningDiv.innerText = isEnglish
+                    ? `⚠️ Failed to resolve delegated name server(s): ${node.nsResolutionWarning.names.join(', ')}. Continuing with the other name servers.`
+                    : `⚠️ 委任先 NS (${node.nsResolutionWarning.names.join(', ')}) の名前解決に失敗しました。他の NS で追跡を継続します。`;
                 itemBlock.appendChild(warningDiv);
             }
 
@@ -788,15 +995,21 @@ function renderGlueInfo(traceLog, target, parentDelegationUnavailable = false, z
         const message = document.createElement('div');
         message.className = 'empty-log';
         message.textContent = parentDelegationUnavailable
-            ? '親子ゾーンが同じ権威サーバーのため、親側 referral の ADDITIONAL SECTION は取得できません。'
-            : '親の権威サーバーの応答を取得できないため、ADDITIONAL SECTION は確認できません。';
+            ? (isEnglish
+                ? 'The parent-side referral ADDITIONAL SECTION is unavailable because the parent and child zones use the same authoritative servers.'
+                : '親子ゾーンが同じ権威サーバーのため、親側 referral の ADDITIONAL SECTION は取得できません。')
+            : (isEnglish
+                ? 'Could not inspect the ADDITIONAL SECTION because no response was received from the parent authoritative server.'
+                : '親の権威サーバーの応答を取得できないため、ADDITIONAL SECTION は確認できません。');
         target.appendChild(message);
         return;
     }
 
     const note = document.createElement('p');
     note.className = 'glue-note';
-    note.textContent = '親の権威サーバーに問い合わせた結果をサーバー IP アドレスごとに表示します（OPT は除外）。RFC 9499 の分類は各サーバーが返した委任先 NS に対応する A/AAAA レコードが対象です。なお、委任追跡の際にこれらの IP アドレスを必ず採用するということではありません。';
+    note.textContent = isEnglish
+        ? 'Responses from each parent authoritative server are shown by server IP (OPT is excluded). RFC 9499 classification applies to A/AAAA records corresponding to delegated NS names. These addresses are not necessarily used when tracing the delegation.'
+        : '親の権威サーバーに問い合わせた結果をサーバー IP アドレスごとに表示します（OPT は除外）。RFC 9499 の分類は各サーバーが返した委任先 NS に対応する A/AAAA レコードが対象です。なお、委任追跡の際にこれらの IP アドレスを必ず採用するということではありません。';
     target.appendChild(note);
 
     infos.forEach(info => {
@@ -810,13 +1023,17 @@ function renderGlueInfo(traceLog, target, parentDelegationUnavailable = false, z
 function renderGlueServerInfo(info, target) {
     const source = document.createElement('p');
     source.className = 'glue-source';
-    source.textContent = `取得元: ${info.serverName ? `${info.serverName} (${info.server})` : info.server} / 親ゾーン: ${info.parentZone}${info.delegatedZone ? ` / 委任先: ${info.delegatedZone}` : ''}`;
+    source.textContent = isEnglish
+        ? `Source: ${info.serverName ? `${info.serverName} (${info.server})` : info.server} / Parent zone: ${info.parentZone}${info.delegatedZone ? ` / Delegated zone: ${info.delegatedZone}` : ''}`
+        : `取得元: ${info.serverName ? `${info.serverName} (${info.server})` : info.server} / 親ゾーン: ${info.parentZone}${info.delegatedZone ? ` / 委任先: ${info.delegatedZone}` : ''}`;
     target.appendChild(source);
 
     if (info.error) {
         const message = document.createElement('div');
         message.className = 'empty-log';
-        message.textContent = `応答を取得できないため、ADDITIONAL SECTION は確認できません。エラー: ${info.error}${info.detail ? ` - ${info.detail}` : ''}`;
+        message.textContent = isEnglish
+            ? `Could not inspect the ADDITIONAL SECTION because no response was received. Error: ${info.error}${info.detail ? ` - ${info.detail}` : ''}`
+            : `応答を取得できないため、ADDITIONAL SECTION は確認できません。エラー: ${info.error}${info.detail ? ` - ${info.detail}` : ''}`;
         target.appendChild(message);
         return;
     }
@@ -824,7 +1041,9 @@ function renderGlueServerInfo(info, target) {
     if (info.records.length === 0) {
         const message = document.createElement('div');
         message.className = 'empty-log';
-        message.textContent = 'ADDITIONAL SECTION は空です（OPT Pseudo Section は除外）。';
+        message.textContent = isEnglish
+            ? 'The ADDITIONAL SECTION is empty (OPT pseudo-sections are excluded).'
+            : 'ADDITIONAL SECTION は空です（OPT Pseudo Section は除外）。';
         target.appendChild(message);
         return;
     }
@@ -832,7 +1051,8 @@ function renderGlueServerInfo(info, target) {
     const table = document.createElement('table');
     table.className = 'glue-table';
     const header = document.createElement('tr');
-    ['名前', 'TTL', 'CLASS', 'TYPE', '内容', 'RFC 9499 分類'].forEach(label => {
+    (isEnglish ? ['Name', 'TTL', 'CLASS', 'TYPE', 'Data', 'RFC 9499 classification']
+        : ['名前', 'TTL', 'CLASS', 'TYPE', '内容', 'RFC 9499 分類']).forEach(label => {
         const cell = document.createElement('th');
         cell.textContent = label;
         header.appendChild(cell);
@@ -851,7 +1071,8 @@ function renderGlueServerInfo(info, target) {
     );
     sortedRecords.forEach(({ record, data }) => {
         const row = document.createElement('tr');
-        [record.name || '.', record.ttl ?? '-', record.class || 'IN', record.type, data, record.classification || '分類対象外'].forEach(value => {
+        [record.name || '.', record.ttl ?? '-', record.class || 'IN', record.type, data,
+            record.classification || (isEnglish ? 'Not classified' : '分類対象外')].forEach(value => {
             const cell = document.createElement('td');
             cell.textContent = String(value);
             row.appendChild(cell);
@@ -874,7 +1095,7 @@ function buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnav
 
     const zoneHeader = document.createElement('div');
     zoneHeader.className = 'log-panel-header';
-    zoneHeader.textContent = 'ゾーン頂点探索ログ';
+    zoneHeader.textContent = isEnglish ? 'Zone apex discovery log' : 'ゾーン頂点探索ログ';
     zonePanel.appendChild(zoneHeader);
 
     const zoneBody = document.createElement('div');
@@ -882,7 +1103,7 @@ function buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnav
     if (zoneApexLog.length > 0) {
         renderLogTree(zoneApexLog, zoneBody);
     } else {
-        zoneBody.innerHTML = '<div class="empty-log">表示するログがありません</div>';
+        zoneBody.innerHTML = `<div class="empty-log">${isEnglish ? 'No logs to display.' : '表示するログがありません'}</div>`;
     }
     zonePanel.appendChild(zoneBody);
 
@@ -891,7 +1112,7 @@ function buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnav
 
     const traceHeader = document.createElement('div');
     traceHeader.className = 'log-panel-header';
-    traceHeader.textContent = '委任追跡ログ';
+    traceHeader.textContent = isEnglish ? 'Delegation trace log' : '委任追跡ログ';
     tracePanel.appendChild(traceHeader);
 
     const traceBody = document.createElement('div');
@@ -899,7 +1120,7 @@ function buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnav
     if (traceLog.length > 0) {
         renderLogTree(traceLog, traceBody);
     } else {
-        traceBody.innerHTML = '<div class="empty-log">表示するログがありません</div>';
+        traceBody.innerHTML = `<div class="empty-log">${isEnglish ? 'No logs to display.' : '表示するログがありません'}</div>`;
     }
     tracePanel.appendChild(traceBody);
 
@@ -907,7 +1128,7 @@ function buildDualLogView(zoneApexLog, traceLog, container, parentDelegationUnav
     gluePanel.className = 'log-panel';
     const glueHeader = document.createElement('div');
     glueHeader.className = 'log-panel-header';
-    glueHeader.textContent = 'グルー情報';
+    glueHeader.textContent = isEnglish ? 'Glue information' : 'グルー情報';
     gluePanel.appendChild(glueHeader);
     const glueBody = document.createElement('div');
     glueBody.className = 'log-panel-body';

@@ -8,6 +8,10 @@
 
 <https://www.on-link.jp/dns-delegation-check/>
 
+英語表示は次の URL から利用できます。画面上部のリンクから日本語・英語を切り替えられます。
+
+<https://www.on-link.jp/dns-delegation-check/en/>
+
 URL パラメーターで調査対象を指定することもできます。
 
 ```text

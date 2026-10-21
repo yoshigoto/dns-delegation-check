@@ -93,7 +93,14 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: '1kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('/', (req, res) => res.type('html').send(indexHtml));
+app.get(['/','/en','/en/'], (req, res) => {
+    const isEnglish = req.path.startsWith('/en');
+    const html = isEnglish
+        ? indexHtml.replace('<html lang="ja">', '<html lang="en">')
+            .replace('<title>DNS委任チェッカー</title>', '<title>DNS Delegation Checker</title>')
+        : indexHtml;
+    res.type('html').send(html);
+});
 
 const activeTracesByClient = new Map();
 const recentRequestsByClient = new Map();

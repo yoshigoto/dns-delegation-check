@@ -109,9 +109,63 @@ function renderVerdict(logData, parentDelegationUnavailable = false, delegationL
     return summaryPanel.children[0].textContent;
 }
 
+function loadPage(lang) {
+    const elements = new Map([
+        ['language-switch', { ...createElement(), addEventListener() {} }],
+        ['domain', { ...createElement(), value: 'example.com' }],
+        ['summary-panel', createElement()]
+    ]);
+    const context = {
+        URL,
+        URLSearchParams,
+        localStorage: { getItem: () => null, setItem() {} },
+        document: {
+            documentElement: { lang },
+            createElement,
+            title: '',
+            getElementById(id) {
+                return elements.get(id) || null;
+            }
+        },
+        window: {
+            location: {
+                origin: 'https://example.test',
+                pathname: '/dns-delegation-check/',
+                search: '?source=test'
+            }
+        }
+    };
+    const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+    const script = html.match(/<script>([\s\S]*)<\/script>/)[1];
+    vm.runInNewContext(script, context);
+    return { context, elements };
+}
+
 function getElementText(element) {
     return [element.textContent, ...element.children.map(getElementText)].join('\n');
 }
+
+test('英語表示は切替 URL にドメインを引き継ぎ、概要と詳細を英語で表示する', () => {
+    const { context: japaneseContext } = loadPage('ja');
+    assert.equal(
+        vm.runInNewContext('getLanguageSwitchUrl()', japaneseContext),
+        'https://example.test/dns-delegation-check/en/?source=test&domain=example.com'
+    );
+
+    const { context, elements } = loadPage('en');
+    assert.equal(
+        vm.runInNewContext("translateDetail('委任は正常です。', 'SUCCESS')", context),
+        'The delegation is correct.'
+    );
+
+    context.buildSummary([
+        { status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' },
+        { status: 'SUCCESS', detail: '委任は正常です。' }
+    ]);
+    const summaryText = getElementText(elements.get('summary-panel'));
+    assert.match(summaryText, /Healthy: Delegation is configured correctly/);
+    assert.match(summaryText, /DNS delegation summary/);
+});
 
 test('グルー情報の箱は委任追跡ログの下に表示し、親サーバーごとの応答を表示する', () => {
     const { buildDualLogView } = loadPageWithSearch();

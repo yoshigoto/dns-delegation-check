@@ -189,6 +189,29 @@ test('トップページはセキュリティヘッダーを付与し X-Powered-
     });
 });
 
+test('英語ページは /en/ で配信され、英語の文書言語と同じ CSP を使う', async () => {
+    await withServer(async baseUrl => {
+        const [japaneseResponse, englishResponse] = await Promise.all([
+            fetch(`${baseUrl}/`),
+            fetch(`${baseUrl}/en/`)
+        ]);
+        const [japaneseHtml, englishHtml] = await Promise.all([
+            japaneseResponse.text(),
+            englishResponse.text()
+        ]);
+
+        assert.equal(englishResponse.status, 200);
+        assert.match(japaneseHtml, /<html lang="ja">/);
+        assert.match(englishHtml, /<html lang="en">/);
+        assert.match(englishHtml, /<title>DNS Delegation Checker<\/title>/);
+        assert.match(englishHtml, /Domain name to check/);
+        assert.equal(
+            englishResponse.headers.get('content-security-policy'),
+            japaneseResponse.headers.get('content-security-policy')
+        );
+    });
+});
+
 test('API は不正な入力に対して内部情報を含まない JSON エラーを返す', async () => {
     await withServer(async baseUrl => {
         const malformed = await fetch(`${baseUrl}/api/trace`, {
