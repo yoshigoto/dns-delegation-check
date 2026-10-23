@@ -145,6 +145,8 @@ location / {
 
 `test/dns-self-resolver.integration.test.js` では、外部 DNS に接続せず、テストプロセス内の簡易 DNS 応答器を使って `dns-self-resolver` の実際の UDP/TCP 通信と `dns-packet` の encode/decode を確認します。応答器は固定応答を返すだけで、再帰解決は行いません。OS の特権ポートを避けるため、OS が割り当てた空きポートを `dns-self-resolver` v1.2.1 の正式な `udpPort` / `tcpPort` オプションで指定します。依存ライブラリへの互換パッチは不要です。本番の問い合わせ先ポートは引き続き既定の 53 番です。
 
+`test/api-trace.test.js` では、`createApp({ queryDirectlyUDP, resolveServerIPs })` で DNS 問い合わせと名前解決だけを固定応答に差し替え、実際の HTTP リクエストで `POST /api/trace` を検証します。HTTP 200、JSON のフィールドと型、NS/Glue 一致・NS 不一致・親子同居・CNAME による探索終了、およびリクエストごとのキャッシュと中断シグナルの分離を確認します。DNS の宛先制限や問い合わせ数制限は維持されます。既存の `app` と `startServer()` は、引き続き実際の DNS 処理を使用します。
+
 ```bash
 npm test
 ```

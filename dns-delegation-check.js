@@ -76,31 +76,44 @@ const CONTENT_SECURITY_POLICY = [
     "frame-ancestors 'none'"
 ].join('; ');
 
-const app = express();
-app.disable('x-powered-by');
-// nginx 等のローカルリバースプロキシ経由の X-Forwarded-For のみ信頼する。
-app.set('trust proxy', 'loopback');
-app.use((req, res, next) => {
-    res.set({
-        'Content-Security-Policy': CONTENT_SECURITY_POLICY,
-        'X-Content-Type-Options': 'nosniff',
-        'X-Frame-Options': 'DENY',
-        'Referrer-Policy': 'no-referrer',
-        'Cross-Origin-Opener-Policy': 'same-origin',
-        'Cross-Origin-Resource-Policy': 'same-origin'
+function createApp({ queryDirectlyUDP: queryUDP = queryDirectlyUDP, resolveServerIPs: resolveIPs = resolveServerIPs } = {}) {
+    const app = express();
+    app.disable('x-powered-by');
+    // nginx 等のローカルリバースプロキシ経由の X-Forwarded-For のみ信頼する。
+    app.set('trust proxy', 'loopback');
+    app.use((req, res, next) => {
+        res.set({
+            'Content-Security-Policy': CONTENT_SECURITY_POLICY,
+            'X-Content-Type-Options': 'nosniff',
+            'X-Frame-Options': 'DENY',
+            'Referrer-Policy': 'no-referrer',
+            'Cross-Origin-Opener-Policy': 'same-origin',
+            'Cross-Origin-Resource-Policy': 'same-origin'
+        });
+        next();
     });
-    next();
-});
-app.use(express.json({ limit: '1kb' }));
-app.use(express.static(path.join(__dirname, 'public')));
-app.get(['/','/en','/en/'], (req, res) => {
-    const isEnglish = req.path.startsWith('/en');
-    const html = isEnglish
-        ? indexHtml.replace('<html lang="ja">', '<html lang="en">')
-            .replace('<title>DNS委任チェッカー</title>', '<title>DNS Delegation Checker</title>')
-        : indexHtml;
-    res.type('html').send(html);
-});
+    app.use(express.json({ limit: '1kb' }));
+    app.use(express.static(path.join(__dirname, 'public')));
+    app.get(['/','/en','/en/'], (req, res) => {
+        const isEnglish = req.path.startsWith('/en');
+        const html = isEnglish
+            ? indexHtml.replace('<html lang="ja">', '<html lang="en">')
+                .replace('<title>DNS委任チェッカー</title>', '<title>DNS Delegation Checker</title>')
+            : indexHtml;
+        res.type('html').send(html);
+    });
+    const dnsDependencies = { queryDirectlyUDP: queryUDP, resolveServerIPs: resolveIPs };
+    app.post('/api/trace', (req, res) => handleTrace(req, res, dnsDependencies));
+
+    // 不正な JSON 等でスタックトレースを含む既定のエラーページを返さない。
+    app.use((error, req, res, next) => {
+        if (res.headersSent) return next(error);
+        const status = Number.isInteger(error?.status) && error.status >= 400 && error.status < 500 ? error.status : 500;
+        if (status === 500) console.error('[http]', error);
+        res.status(status).json({ success: false, error: status === 500 ? '内部エラーが発生しました。' : '不正なリクエストです。' });
+    });
+    return app;
+}
 
 const activeTracesByClient = new Map();
 const recentRequestsByClient = new Map();
@@ -881,7 +894,7 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
     return serverResults.flat();
 }
 
-app.post('/api/trace', async (req, res) => {
+async function handleTrace(req, res, dnsDependencies) {
     const domain = typeof req.body?.domain === 'string' ? normalizeUserDomain(req.body.domain) : '';
     if (!domain) {
         return res.status(400).json({ error: 'ドメイン名を入力してください' });
@@ -898,6 +911,7 @@ app.post('/api/trace', async (req, res) => {
     res.once('close', abortOnResponseClose);
     let zoneApexTimer;
     const traceDependencies = {
+        ...dnsDependencies,
         signal: abortController.signal,
         isAllowedServerIP: isPublicServerIP,
         queryBudget: { remaining: MAX_QUERIES_PER_TRACE, exhausted: false }
@@ -932,7 +946,7 @@ app.post('/api/trace', async (req, res) => {
         if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && !zoneApexInfo.parentDelegationUnavailable) {
             const serverList = zoneApexInfo.parentServerIPs.length > 0
                 ? zoneApexInfo.parentServerIPs
-                : await resolveServerIPs('a.root-servers.net', createResolverDependencies(traceDependencies, dnsResponseCache, createQueryFunction(traceDependencies))) || [];
+                : await dnsDependencies.resolveServerIPs('a.root-servers.net', createResolverDependencies(traceDependencies, dnsResponseCache, createQueryFunction(traceDependencies))) || [];
             const serverNameMap = zoneApexInfo.parentServerNameMap || Object.fromEntries(serverList.map(serverIp => [serverIp, zoneApexInfo.parentNs || 'a.root-servers.net']));
             traceLog = await traceDomain(zoneApexInfo.zoneApex, serverList, dnsResponseCache, null, 1, [], {}, traceDependencies, serverNameMap, zoneApexInfo.parentZone || '');
         } else if (!zoneApexInfo.timedOut && zoneApexInfo.zoneApex !== '' && zoneApexInfo.parentDelegationUnavailable) {
@@ -975,15 +989,9 @@ app.post('/api/trace', async (req, res) => {
         res.off('close', abortOnResponseClose);
         releaseTraceSlot();
     }
-});
+}
 
-// 不正な JSON 等でスタックトレースを含む既定のエラーページを返さない。
-app.use((error, req, res, next) => {
-    if (res.headersSent) return next(error);
-    const status = Number.isInteger(error?.status) && error.status >= 400 && error.status < 500 ? error.status : 500;
-    if (status === 500) console.error('[http]', error);
-    res.status(status).json({ success: false, error: status === 500 ? '内部エラーが発生しました。' : '不正なリクエストです。' });
-});
+const app = createApp();
 
 const HOST = '127.0.0.1';
 const PORT = 3001;
@@ -996,6 +1004,7 @@ function startServer() {
 
 export {
     app,
+    createApp,
     getMinimizedQnames,
     hasParentChildRelationship,
     isInBailiwickGlue,
