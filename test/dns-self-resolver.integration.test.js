@@ -92,7 +92,7 @@ test('dns-self-resolver は非特権ポートのローカル DNS 応答を decod
             '127.0.0.1',
             new Map(),
             'A',
-            { port, timeoutMs: 1000, useEdns: false, use0x20: false }
+            { udpPort: port, tcpPort: port, timeoutMs: 1000, useEdns: false, use0x20: false }
         );
 
         assert.equal(response.error, undefined);
@@ -109,7 +109,7 @@ test('dns-self-resolver は UDP の TC 応答を TCP で再試行する', async 
             '127.0.0.1',
             new Map(),
             'A',
-            { port, timeoutMs: 1000, useEdns: false, use0x20: false }
+            { udpPort: port, tcpPort: port, timeoutMs: 1000, useEdns: false, use0x20: false }
         );
 
         assert.equal(response.error, undefined);
@@ -128,7 +128,7 @@ test('dns-self-resolver はタイムアウトと AbortSignal を結果として�
                 '127.0.0.1',
                 new Map(),
                 'A',
-                { port, timeoutMs: 50, useEdns: false, use0x20: false }
+                { udpPort: port, tcpPort: port, timeoutMs: 50, useEdns: false, use0x20: false }
             );
             assert.equal(response.error, 'TIMEOUT');
             assert.equal(response.transport, 'udp');
@@ -141,7 +141,7 @@ test('dns-self-resolver はタイムアウトと AbortSignal を結果として�
                 '127.0.0.1',
                 new Map(),
                 'A',
-                { port, timeoutMs: 1000, useEdns: false, use0x20: false, signal: controller.signal }
+                { udpPort: port, tcpPort: port, timeoutMs: 1000, useEdns: false, use0x20: false, signal: controller.signal }
             );
             setTimeout(() => controller.abort(), 20);
             const response = await query;
