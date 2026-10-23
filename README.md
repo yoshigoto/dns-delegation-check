@@ -143,11 +143,13 @@ location / {
 
 ネットワークに依存しない入力検証、DNS 名の親子関係、in-domain glue、RFC 9471 の要約、CNAME/DNAME による探索終了、親子同居時のゾーン頂点探索ログ階層、委任追跡の成功・不一致・タイムアウト・通信エラー・IP アドレス解決不能をテストできます。
 
+`test/dns-self-resolver.integration.test.js` では、外部 DNS に接続せず、テストプロセス内の簡易 DNS 応答器を使って `dns-self-resolver` の実際の UDP/TCP 通信と `dns-packet` の encode/decode を確認します。応答器は固定応答を返すだけで、再帰解決は行いません。OS の特権ポートを避けるため、`dns-self-resolver` に `port` オプションを追加する互換パッチを `scripts/patch-dns-self-resolver.js` で管理し、`npm test` の実行時に適用します。パッチが想定する依存バージョンやコードと一致しない場合はテストを失敗させます。指定がない場合の本番ポートは引き続き 53 番です。
+
 ```bash
 npm test
 ```
 
-テストは `test/dns-delegation-check.test.js`、`test/index-summary.test.js`、`test/security.test.js` にあります。DNS サーバーへ実際に問い合わせる処理は、固定したモック応答に差し替えて評価します。実際の外部 DNS やネットワークの状態には依存しません。
+アプリケーションの委任判定テストは固定したモック応答を使い、実際の外部 DNS やネットワークの状態には依存しません。テストは `test/` にあります。
 
 ## 使い方
 

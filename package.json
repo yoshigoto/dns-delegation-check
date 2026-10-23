@@ -10,6 +10,6 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node scripts/patch-dns-self-resolver.js && node --test test/*.test.js"
   }
 }
