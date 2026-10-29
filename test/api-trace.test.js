@@ -217,6 +217,14 @@ test('POST /api/trace は内部例外の詳細を隠し、失敗後に実行枠�
         assert.doesNotMatch(failedBody, /sensitive internal details|at .*\.js/);
         assert.equal(loggedErrors.mock.callCount(), 1);
 
+        const secondFailedResponse = await fetch(`${baseUrl}/api/trace`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain: 'example.com' })
+        });
+        await secondFailedResponse.text();
+        assert.equal(secondFailedResponse.status, 500);
+
         shouldThrow = false;
         const recoveredBody = await requestTrace(baseUrl);
         assert.equal(recoveredBody.success, true);
