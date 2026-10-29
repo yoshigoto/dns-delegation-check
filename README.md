@@ -62,18 +62,18 @@ https://www.on-link.jp/dns-delegation-check/?domain=example.com
 
 ## セットアップと起動
 
-リポジトリのルートで依存パッケージをインストールして、サーバーを起動します。
-
-```bash
-npm ci
-npm start
-```
-
 `.nvmrc` に合わせる場合は、nvm で Node.js をインストールして使用します。
 
 ```bash
 nvm install
 nvm use
+```
+
+リポジトリのルートで依存パッケージをインストールし、サーバーを起動します。
+
+```bash
+npm ci
+npm start
 ```
 
 WSL2 を使う場合は、リポジトリを Windows 側ではなく Linux ファイルシステム上に配置し、Ubuntu のターミナルからコマンドを実行してください。
