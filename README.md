@@ -1,18 +1,18 @@
-# DNS委任チェッカー
+# DNS 委任チェッカー
 
-ドメインの DNS 委任チェーンをたどり、親ゾーンと子ゾーンの NS レコードおよび Glue レコードに不整合がないかを確認する Web アプリです。
+DNS 委任チェーンをたどり、親ゾーンと子ゾーンの NS レコードや Glue 情報を照合する Web アプリです。
 
-## Web アプリ
+## 公開サイト
 
-公開版は次の URL から利用できます。
+日本語版:
 
 <https://www.on-link.jp/dns-delegation-check/>
 
-英語表示は次の URL から利用できます。画面上部のリンクから日本語・英語を切り替えられます。
+英語版:
 
 <https://www.on-link.jp/dns-delegation-check/en/>
 
-URL パラメーターで調査対象を指定することもできます。
+画面上部のリンクから表示言語を切り替えられます。URL の `domain` パラメーターで調査対象を指定することもできます。
 
 ```text
 https://www.on-link.jp/dns-delegation-check/?domain=example.com
@@ -20,112 +20,72 @@ https://www.on-link.jp/dns-delegation-check/?domain=example.com
 
 ## 機能
 
-- 入力したドメインのゾーン頂点を、ルート DNS から順に探索
-- DNS の委任チェーンを親から子へ追跡
-- 親が保持する NS 情報と、子の権威サーバーが返す NS 情報を比較
-- 親の Glue レコードと、NS ホスト名から解決した IP アドレスを比較
-- RFC 9471 に基づき、in-domain glue、sibling glue、および TC による TCP 再試行を表示
-- BIND の strict glue と同様に、NS のターゲットが委任先ゾーン外の sibling glue は採用せず、名前解決を行う
-- RFC 9499 で Unrelated と分類される NS の ADDITIONAL アドレスは採用せず、その理由を警告表示
-- IPv4 と IPv6 に対応
-- UDP 応答が切り詰められた場合の TCP フォールバック
-- EDNS に対応していない DNS サーバーへの再試行
-- DNS 応答の短時間キャッシュ
-- ゾーン頂点探索ログと委任追跡ログをツリー形式で表示
-- 委任追跡ログの下の「グルー情報」に、ゾーン頂点探索で問い合わせた親の各権威サーバーの ADDITIONAL SECTION をサーバー IP アドレスごとに表示（複数サーバーの応答は合算しない）
-  - 各表を「名前」、次に「内容」の昇順で表示（名前の大小文字・末尾のドットは同一視し、文字列中の数字は自然順で比較）
-  - 委任先 NS に対応する A/AAAA レコードを RFC 9499 の `in-domain`、`sibling domain`、`unrelated` に分類し、それ以外は分類対象外として表示
-  - OPT Pseudo Section を除外し、空の ADDITIONAL SECTION と応答を取得できない場合をサーバーごとに区別
-  - 表示はアドレスの採用を意味せず、既存の strict glue による追跡動作は変更しない
-- CNAME、DNAME、タイムアウト、通信エラーなどを表示し、ゾーン頂点探索のタイムアウトやクライアント切断時には進行中の DNS 問い合わせを中断
+- ルートからゾーン頂点を探索し、親から子へ委任チェーンを追跡
+- 親が委任する NS 情報と、子の権威サーバーが返す NS 情報を照合
+- 親の Glue と、NS ホスト名から解決した IP アドレスを比較
+- RFC 9471 / RFC 9499 に基づき、委任応答の A/AAAA レコードを `in-domain`、`sibling domain`、`unrelated` に分類
+- strict-glue 方針に基づき、sibling glue と unrelated アドレスは追跡先に使わず、NS 名を解決
+- UDP 応答が切り詰められた場合は TCP で再試行し、EDNS 非対応サーバーには EDNS を無効にして再試行
+- IPv4 / IPv6 に対応し、DNS 応答を短時間キャッシュ
+- ゾーン頂点探索と委任追跡の結果をツリー形式で表示
+- 親の権威サーバーごとに ADDITIONAL SECTION を表示。応答は合算せず、空の応答と通信失敗を区別
+- Glue 情報の表は名前、内容の順に自然順で並べ、OPT レコードを除外
+- CNAME、DNAME、タイムアウト、通信エラーなどを表示。ゾーン頂点探索のタイムアウト時やクライアント切断時は、進行中の DNS 問い合わせを中断
 
 ## 判定結果
 
-画面では、主に次のステータスを表示します。
+画面には、主に次のステータスが表示されます。
 
 | ステータス | 意味 |
 | --- | --- |
-| `DELEGATED` | 親サーバーから次の委任先 NS レコードを取得した |
-| `SUCCESS` | 権威サーバーが応答し、委任情報が一致している |
-| `COLOCATED_DELEGATION` | 親子ゾーンが同じ権威サーバーで提供され、親が保持する NS 情報を取得・比較できない |
-| `LAME_DELEGATION_NOT_MATCH` | NS または IP アドレスの情報が一致していない |
-| `LAME_DELEGATION_NO_ZONE` | 権威サーバーとして指定されているがゾーンを保持していない、または委任先が同じサーバーへの紹介を繰り返す |
-| `LAME_DELEGATION_NO_AUTHORITY_NS` | 権威応答の Authority セクションに NS レコードがない |
-| `LAME_DELEGATION_NO_IP_ADDRESS` | NS ホスト名の IP アドレスを解決できない |
-| `LAME_DELEGATION_NO_NS_IP_ADDRESS` | ゾーン頂点探索中に、委任先 NS の IP アドレスを取得できず追跡を続けられない |
+| `DELEGATED` | 親サーバーから次の委任先 NS を取得した |
+| `SUCCESS` | 権威サーバーが応答し、比較対象の委任情報が一致した |
+| `COLOCATED_DELEGATION` | 親子ゾーンが同じ権威サーバーで提供され、親側の委任情報を比較できない |
+| `LAME_DELEGATION_NOT_MATCH` | 親子間で NS 情報または IP アドレスが一致しない |
+| `LAME_DELEGATION_NO_ZONE` | 対象ゾーンの権威 NS が応答にない、または追跡済みサーバーへの紹介が繰り返される |
+| `LAME_DELEGATION_NO_AUTHORITY_NS` | 委任応答の AUTHORITY セクションに NS レコードがない |
+| `LAME_DELEGATION_NO_IP_ADDRESS` | 委任先 NS の IP アドレスを解決できない |
+| `LAME_DELEGATION_NO_NS_IP_ADDRESS` | ゾーン頂点探索中に委任先 NS の IP アドレスを取得できず、探索を続けられない |
+| `LAME_DELEGATION_NON_PUBLIC_ADDRESS` | 委任先にグローバルユニキャストではないアドレスが含まれているため、問い合わせを行わない |
 | `LAME_DELEGATION_TIMEOUT` | DNS サーバーから応答がない |
-| `LAME_DELEGATION_MAX_DEPTH` | 委任チェーンが最大深度に達した |
-| `NETWORK_ERROR` | DNS 通信または応答の解析でエラーが発生した |
-| `ZONE_APEX_LOOKUP_TIMEOUT` | ゾーン頂点探索が 30 秒以内に完了しなかった |
-| `CNAME_FOUND` | 入力名が CNAME のため、ゾーン委任の検査対象外になった |
-| `DNAME_FOUND` | DNAME によりゾーン頂点を確定できなかった |
+| `LAME_DELEGATION_MAX_DEPTH` | 委任チェーンが追跡上限に達した |
+| `NETWORK_ERROR` | DNS 通信または応答の処理中にエラーが発生した |
+| `QUERY_LIMIT_EXCEEDED` | 1 回の検査で実行できる DNS 問い合わせ数の上限に達した |
+| `ZONE_APEX_LOOKUP_TIMEOUT` | ゾーン頂点の探索が 30 秒以内に完了しなかった |
+| `CNAME_FOUND` | 入力名が CNAME のため、委任検査を終了した |
+| `DNAME_FOUND` | DNAME が見つかり、ゾーン頂点を確定できなかった |
 
 ## 必要な環境
 
-- Node.js 18 以降（`package.json` で指定するプロジェクト要件）
-- DNS サーバーへ UDP/TCP の 53 番ポートで接続できるネットワーク
+- Node.js 18 以降（`.nvmrc` では Node.js 22 を指定）
+- アプリケーションサーバーから DNS サーバーへ UDP/TCP の 53 番ポートで接続できるネットワーク
 
-## WSL2 の Ubuntu で開発する場合
+## セットアップと起動
 
-リポジトリは Windows 側ではなく、WSL2 の Ubuntu ファイルシステム上（例: `~/src/dns-delegation-check`）に配置してください。VS Code は Ubuntu のターミナルから次のように起動すると、Node.js、依存パッケージ、テストがすべて WSL 側で実行されます。
-
-```bash
-cd ~/src/dns-delegation-check
-code .
-```
-
-Ubuntu に Node.js 18 以降と npm を用意したうえで、依存パッケージをインストールします。Ubuntu のパッケージを使う場合は、次のコマンドでインストールできます。
-
-```bash
-sudo apt update
-sudo apt install -y nodejs npm
-which node
-which npm
-node --version
-npm --version
-npm ci
-npm test
-```
-
-Node.js のバージョン管理には nvm を使えます。リポジトリの `.nvmrc` に合わせて、次のコマンドを実行してください。
+`.nvmrc` に合わせる場合は、nvm で Node.js をインストールして使用します。
 
 ```bash
 nvm install
 nvm use
 ```
 
-`.nvmrc` には Node.js 22 を指定しています。Node.js 18 以降が必要なプロジェクト要件を満たしつつ、Ubuntu 上で開発バージョンを揃えられます。
+リポジトリのルートで依存パッケージをインストールし、サーバーを起動します。
 
-`which node` と `which npm` が `/usr/bin`、`$HOME/.nvm` などを示し、`/mnt/c/Program Files/nodejs` を示さないことを確認してください。既存の `node_modules` が Windows 側の npm で作られている場合は、WSL 側で `rm -rf node_modules && npm ci` を実行して作り直します。
+```bash
+npm ci
+npm start
+```
 
-VS Code の統合ターミナルは、このワークスペースでは Linux の Bash を既定にしています。WSL 拡張機能を使用している場合は、ステータスバーで Ubuntu に接続した状態で開発してください。
+WSL2 を使う場合は、リポジトリを Windows 側ではなく Linux ファイルシステム上に配置し、Ubuntu のターミナルからコマンドを実行してください。
 
-## ローカルでの起動
-
-1. 依存パッケージをインストールします。
-
-   ```bash
-   npm install
-   ```
-
-2. サーバーを起動します。
-
-   ```bash
-   npm start
-   ```
-
-PM2 を使用する場合も、アプリ本体ではなく起動用の `server.js` を指定します。
+サーバーは `127.0.0.1:3001` で待ち受けます。ブラウザーで <http://localhost:3001/> を開いてください。PM2 を使う場合は、起動用の `server.js` を指定します。
 
 ```bash
 pm2 start server.js --name dns-delegation-check
 pm2 save
 ```
 
-3. ブラウザーで次の URL を開きます。
-
-   <http://localhost:3001/>
-
-サーバーは `127.0.0.1:3001` のみで待ち受けます。nginx からは次のように転送してください。
+nginx をリバースプロキシとして使う場合は、Node.js サーバーがループバックで待ち受ける構成を維持してください。クライアント IP の判定に `X-Forwarded-For` を使うため、アプリはループバックからの転送だけを信頼します。
 
 ```nginx
 location / {
@@ -137,34 +97,24 @@ location / {
 }
 ```
 
-外部から Node.js のポートへ直接接続できない構成になります。ローカルでの確認は <http://127.0.0.1:3001/> を使用してください。
-
 ## テスト
 
-ネットワークに依存しない入力検証、DNS 名の親子関係、in-domain glue、RFC 9471 の要約、CNAME/DNAME による探索終了、親子同居時のゾーン頂点探索ログ階層、委任追跡の成功・不一致・タイムアウト・通信エラー・IP アドレス解決不能をテストできます。
-
-`test/dns-self-resolver.integration.test.js` では、外部 DNS に接続せず、テストプロセス内の簡易 DNS 応答器を使って `dns-self-resolver` の実際の UDP/TCP 通信と `dns-packet` の encode/decode を確認します。応答器は固定応答を返すだけで、再帰解決は行いません。OS の特権ポートを避けるため、OS が割り当てた空きポートを `dns-self-resolver` v1.2.1 の正式な `udpPort` / `tcpPort` オプションで指定します。依存ライブラリへの互換パッチは不要です。本番の問い合わせ先ポートは引き続き既定の 53 番です。
-
-`test/api-trace.test.js` では、`createApp({ queryDirectlyUDP, resolveServerIPs })` で DNS 問い合わせと名前解決だけを固定応答に差し替え、実際の HTTP リクエストで `POST /api/trace` を検証します。HTTP 200、JSON のフィールドと型、NS/Glue 一致・NS 不一致・親子同居・CNAME による探索終了、およびリクエストごとのキャッシュと中断シグナルの分離を確認します。DNS の宛先制限や問い合わせ数制限は維持されます。既存の `app` と `startServer()` は、引き続き実際の DNS 処理を使用します。
-
-`test/api-limits.test.js` では、実際の HTTP リクエストで毎分10件のレート制限、同一クライアント2件・全体8件の同時実行上限、HTTP 429/503 の JSON と `Retry-After` を確認します。レート制限の60秒境界は `Date.now()` の差し替えで、同時実行は DNS モックの完了を制御して検証するため、実時間の待機は不要です。拒否したリクエストが DNS 処理を開始せず、同時実行制限による拒否がレート枠を消費しないことも確認します。正常完了後の実行枠の再利用に加え、名前解決・ゾーン頂点探索・委任追跡の各段階で HTTP 接続を切断し、DNS 中断とクライアント別・全体の実行枠の解放、他のリクエストへの影響がないことを検証します。
+テストは `test/` にあります。委任判定と API のテストは固定応答を使うため、外部 DNS やネットワークの状態に依存しません。DNS ライブラリの統合テストでは、プロセス内の簡易 DNS サーバーを使って UDP/TCP の通信を確認します。
 
 ```bash
 npm test
 ```
 
-アプリケーションの委任判定テストは固定したモック応答を使い、実際の外部 DNS やネットワークの状態には依存しません。テストは `test/` にあります。
-
 ## 使い方
 
 1. 「調査するドメイン名」にドメインを入力します。
-2. 「解析スタート」を選択します。
+2. 「解析スタート」をクリックします。
 3. 「DNS委任の要点」で全体の判定を確認します。
 4. 「ゾーン頂点探索ログ」と「委任追跡ログ」で、各 DNS サーバーの応答と NS/Glue の比較結果を確認します。
 
-調査を開始したドメイン名はブラウザーの localStorage に保存され、次回表示時に復元されます。URL に `domain` パラメータがある場合は、その値を優先して調査します。
+調査を開始したドメイン名はブラウザーの `localStorage` に保存され、次回表示時に復元されます。URL に `domain` パラメーターがある場合は、その値を優先します。
 
-入力値はホスト名として検証されます。`https://example.com` のような URL 形式も入力できますが、パスやクエリは調査対象には含まれません。
+ドメイン名のほか、`https://example.com/path` のような URL も入力できます。URL の場合はホスト名だけを調査し、パスやクエリは使用しません。
 
 ## API
 
@@ -181,38 +131,46 @@ Content-Type: application/json
 {"domain":"example.com"}
 ```
 
-成功時は、ゾーン頂点探索の `zoneApexLog` と委任追跡の `traceLog` を含む JSON を返します。
+成功時は、ゾーン頂点探索ログ `zoneApexLog`、委任追跡ログ `traceLog`、および親の権威サーバーごとのグルー情報 `parentGlueInfos` を含む JSON を返します。
 
 ```json
 {
   "success": true,
   "parentDelegationUnavailable": false,
+  "parentGlueInfos": [],
   "zoneApexLog": [],
   "traceLog": []
 }
 ```
 
-ドメインが不正な場合は HTTP 400、リクエスト本文が 1 KB を超える場合は HTTP 413、同一クライアントからのリクエストが 1 分間に 10 回を超えた場合は HTTP 429、同時実行数の上限 (全体 8 件、同一クライアント 2 件) に達した場合は HTTP 503、サーバー内部でエラーが発生した場合は HTTP 500 を返します。エラー時の本文は `{"success": false, "error": "..."}` 形式で、内部のエラー詳細は含みません。
+| HTTP ステータス | 発生条件 |
+| --- | --- |
+| `400` | ドメイン名が不正、またはリクエスト形式が不正 |
+| `413` | リクエスト本文が 1 KB を超過 |
+| `429` | クライアントごとのレート制限（1 分間に 10 件）に到達 |
+| `503` | 同時実行数の上限（全体 8 件、クライアントごとに 2 件）に到達 |
+| `500` | サーバー内部でエラーが発生 |
+
+不正なドメイン名への `400` 応答は `{"error":"..."}`、その他のエラー応答は `{"success":false,"error":"..."}` 形式です。`429` と `503` には再試行の目安を示す `Retry-After` ヘッダーも含まれます。エラー応答に内部の詳細情報は含まれません。
 
 ## セキュリティ対策
 
-- **内部ネットワークへの問い合わせ防止 (SSRF 対策)**: 委任先 NS の IP アドレス (glue および名前解決結果) がループバック、プライベート、リンクローカル、CGNAT、ULA、IPv4-mapped IPv6、ドキュメント用、マルチキャスト等のグローバルユニキャストではないアドレスの場合は問い合わせを行わず、`LAME_DELEGATION_NON_PUBLIC_ADDRESS` として表示します。TCP フォールバックや NS 名の名前解決を含むすべての DNS 問い合わせに適用されます。
-- **問い合わせ数の制限**: 1 回の検査あたりの DNS 問い合わせは 1000 件まで、1 つの referral から追跡する NS アドレスは 32 件までです。上限に達した場合は `QUERY_LIMIT_EXCEEDED` を表示し、結果が不完全であることを示します。
-- **レート制限**: クライアントごとに 1 分間 10 回、同時 2 件まで、サーバー全体で同時 8 件までです。クライアントの判定には、ループバックのリバースプロキシ (nginx) から渡された `X-Forwarded-For` のみを使用します。
-- **HTTP セキュリティヘッダー**: `Content-Security-Policy` (インラインスクリプトはハッシュで許可し、inline イベントハンドラは使用しません)、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 等を付与し、`X-Powered-By` は返しません。
-- **XSS 対策**: DNS 応答由来の文字列はすべて `textContent` / `innerText` で表示します。
+- **内部ネットワークへの問い合わせ防止（SSRF 対策）**: 委任先 NS の Glue や名前解決で得た IP アドレスが、グローバルユニキャストではない場合は問い合わせず、`LAME_DELEGATION_NON_PUBLIC_ADDRESS` として記録します。この制限は TCP への再試行を含む DNS 問い合わせ先に適用されます。
+- **問い合わせ数の制限**: 1 回の検査につき最大 1000 件、1 つの referral につき最大 32 個の NS アドレスを追跡します。問い合わせ数の上限に達すると `QUERY_LIMIT_EXCEEDED` を記録し、結果が不完全であることを示します。
+- **レート・同時実行制限**: クライアントごとに 1 分間 10 件、同時 2 件まで、サーバー全体で同時 8 件までです。アプリはループバックからの転送だけを信頼するため、リバースプロキシから適切な `X-Forwarded-For` を設定してください。
+- **HTTP セキュリティヘッダー**: CSP、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` などを付与し、`X-Powered-By` は返しません。
+- **XSS 対策**: DNS 応答由来の文字列は HTML として挿入せず、DOM のテキスト API で表示します。
 
 ## 構成
 
 - `index.html`: 入力画面、結果表示、ブラウザー側の API 呼び出し
 - `dns-delegation-check.js`: Express サーバー、DNS 問い合わせ、委任追跡、API
-- `server.js`: 本番実行時に Express サーバーを起動するためのファイル
-- `package.json`: Node.js の依存パッケージと ES Modules 設定
+- `server.js`: Express サーバーの起動スクリプト
+- `package.json`: 依存パッケージ、実行スクリプト、ES Modules 設定
 
 ## 注意事項
 
-- DNS 問い合わせは、アプリケーションサーバーから各 DNS サーバーへ実行されます。利用者の端末から直接 DNS 問い合わせを行う仕組みではありません。
-- ゾーン頂点探索は 30 秒でタイムアウトし、進行中の DNS 問い合わせを中断します。個々の DNS 通信のタイムアウトは 5 秒です。
-- ブラウザーが解析リクエストを中断した場合も、サーバー側の進行中の DNS 問い合わせを中断します。HTTP サーバーのタイムアウトは 120 秒です。
-- DNS サーバーの応答、ネットワーク環境、委任設定によっては、正しい設定でも通信エラーやタイムアウトになる場合があります。
-- 調査対象のドメインや DNS サーバーに対する問い合わせが、運用上許可されていることを確認して利用してください。
+- DNS 問い合わせは利用者の端末ではなく、アプリケーションサーバーから実行されます。
+- ゾーン頂点探索は 30 秒、個々の DNS 通信は 5 秒でタイムアウトします。ブラウザーから接続が切断された場合も、サーバーは進行中の DNS 問い合わせを中断します。HTTP サーバーのタイムアウトは 120 秒です。
+- DNS サーバーの応答やネットワーク環境によっては、設定に問題がなくても通信エラーやタイムアウトが発生することがあります。
+- 調査対象への問い合わせが、ネットワークおよび運用上許可されていることを確認して利用してください。

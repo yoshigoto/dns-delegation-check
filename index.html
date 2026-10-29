@@ -851,35 +851,29 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
 }
 
 function renderLogTree(logData, target) {
-    const nodesMap = {};
+    const nodes = logData.map((item, index) => ({
+        ...item,
+        id: item.id || `${item.server}_${index}`,
+        children: []
+    }));
+    const nodesMap = new Map(nodes.map(node => [node.id, node]));
     const rootNodes = [];
+    const latestNodeByServer = new Map();
 
-    logData.forEach((item, index) => {
-        const uniqueId = item.id || `${item.server}_${index}`;
-        item.id = uniqueId;
-        item.children = [];
-        nodesMap[uniqueId] = item;
-    });
-
-    logData.forEach(item => {
-        if (item.parentLogId && nodesMap[item.parentLogId]) {
-            nodesMap[item.parentLogId].children.push(item);
-        } else if (item.parent === null) {
-            rootNodes.push(item);
+    nodes.forEach(node => {
+        if (node.parentLogId && nodesMap.has(node.parentLogId)) {
+            nodesMap.get(node.parentLogId).children.push(node);
+        } else if (node.parent === null) {
+            rootNodes.push(node);
         } else {
-            let foundParent = null;
-            for (let i = logData.indexOf(item) - 1; i >= 0; i--) {
-                if (logData[i].server === item.parent) {
-                    foundParent = logData[i];
-                    break;
-                }
-            }
+            const foundParent = latestNodeByServer.get(node.parent);
             if (foundParent) {
-                foundParent.children.push(item);
+                foundParent.children.push(node);
             } else {
-                rootNodes.push(item);
+                rootNodes.push(node);
             }
         }
+        latestNodeByServer.set(node.server, node);
     });
 
     function generateHtmlList(nodes, checkRoot = false) {

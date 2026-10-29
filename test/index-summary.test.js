@@ -382,6 +382,29 @@ test('ADDITIONAL の IP アドレス採用を委任ログの専用ボックス�
     assert.ok(elements.filter(element => element.className === 'server-detail').every(element => !element.textContent.includes('ADDITIONAL SECTION')));
 });
 
+test('ログツリーは親子関係を保ち、入力ログを変更しない', () => {
+    const { renderLogTree } = loadPageWithSearch();
+    const target = createElement();
+    const logs = [
+        { id: 'root', server: 'parent', parent: null, status: 'ROOT' },
+        { id: 'latest-parent', server: 'parent', parent: null, status: 'LATEST_PARENT' },
+        { server: 'fallback-child', parent: 'parent', status: 'FALLBACK_CHILD' },
+        { id: 'explicit-child', server: 'explicit-child', parent: null, parentLogId: 'root', status: 'EXPLICIT_CHILD' },
+        { server: 'orphan', parent: 'missing-parent', status: 'ORPHAN' }
+    ];
+    const originalLogs = structuredClone(logs);
+
+    renderLogTree(logs, target);
+
+    const rootList = target.children[0].children[0];
+    const getStatus = listItem => listItem.children[0].children[0].children[1].textContent;
+    const rootItems = rootList.children;
+    assert.deepEqual(rootItems.map(getStatus), ['ROOT', 'LATEST_PARENT', 'ORPHAN']);
+    assert.deepEqual(rootItems[0].children[1].children.map(getStatus), ['EXPLICIT_CHILD']);
+    assert.deepEqual(rootItems[1].children[1].children.map(getStatus), ['FALLBACK_CHILD']);
+    assert.deepEqual(logs, originalLogs);
+});
+
 test('verdictがゾーン頂点探索と委任追跡の結果を概要表示する', () => {
     assert.equal(renderVerdict([
         { status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' },
