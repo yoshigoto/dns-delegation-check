@@ -189,3 +189,36 @@ test('POST /api/trace は CNAME による探索終了を空の委任追跡ログ
         assert.equal(fixture.queries.length, 3);
     });
 });
+
+test('POST /api/trace は内部例外の詳細を隠し、失敗後に実行枠を解放する', async t => {
+    const fixture = createDnsFixture();
+    const queryDirectlyUDP = fixture.dependencies.queryDirectlyUDP;
+    let shouldThrow = true;
+    fixture.dependencies.queryDirectlyUDP = async (...args) => {
+        if (shouldThrow) throw new Error('sensitive internal details');
+        return queryDirectlyUDP(...args);
+    };
+    const loggedErrors = t.mock.method(console, 'error', () => {});
+
+    await withServer(t, fixture.dependencies, async baseUrl => {
+        const failedResponse = await fetch(`${baseUrl}/api/trace`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain: 'example.com' })
+        });
+        const failedBody = await failedResponse.text();
+
+        assert.equal(failedResponse.status, 500);
+        assert.match(failedResponse.headers.get('content-type'), /^application\/json\b/);
+        assert.deepEqual(JSON.parse(failedBody), {
+            success: false,
+            error: '内部エラーが発生しました。'
+        });
+        assert.doesNotMatch(failedBody, /sensitive internal details|at .*\.js/);
+        assert.equal(loggedErrors.mock.callCount(), 1);
+
+        shouldThrow = false;
+        const recoveredBody = await requestTrace(baseUrl);
+        assert.equal(recoveredBody.success, true);
+    });
+});
