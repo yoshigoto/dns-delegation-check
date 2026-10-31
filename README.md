@@ -73,7 +73,9 @@ nvm use
 
 リポジトリのルートで依存パッケージをインストールし、サーバーを起動します。
 
-DNS の名前解決ライブラリ `dns-self-resolver` は、送信予算 API を追加した Git タグ `v1.5.0` に固定しています。referral 分類と `in-domain-only` 方針、および非公開アドレスのみの最終回答を TTL 内は再問い合わせせず診断に利用する動作も維持しています。
+DNS の名前解決ライブラリ `dns-self-resolver` は、referral の妥当性判定と NS 候補 API を追加したバージョン `1.6.0` のコミット `93ccdfb697b3dc18624206e494ee06a6f2807bea` に固定しています。この変更のタグはまだ公開していません。送信予算、referral 分類と `in-domain-only` 方針、および非公開アドレスのみの最終回答を TTL 内は再問い合わせせず診断に利用する動作も維持しています。
+
+`getZoneApex` 本体はアプリに残し、referral の名前関係の判定と NS ごとのアドレス候補の生成だけ共通 API を利用します。ゾーン探索は問い合わせ名に一致する委任 NS（`queryNamePolicy: 'exact'`）、診断追跡は親子関係のある NS（`related`）を採用し、どちらも `requireBelowServerZone: false` で既存の診断範囲を維持します。`in-domain-only`、A/AAAA の複数候補、glue のない NS の個別自己解決、宛先拒否・循環の診断は変更していません。ルート・入れ子の NS 自己解決は引き続きライブラリ既定の厳密な referral 判定を使います。
 
 ```bash
 npm ci

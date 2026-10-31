@@ -40,6 +40,36 @@ function createTraceTestDependencies(responseByServer, resolvedIPs = {}) {
     };
 }
 
+test('共通referral候補でも委任診断はNS順のA/AAAAとglueless自己解決を維持する', async () => {
+    const queried = [];
+    const resolved = [];
+    const domain = 'child.example.com';
+    const nsNames = ['ns2.child.example.com', 'NS1.Child.Example.COM.', 'ns.external.net', 'ns1.child.example.com'];
+    const result = await traceDomain(domain, ['192.0.2.10'], new Map(), null, 1, [], {}, {
+        resolveServerIPs: async name => {
+            resolved.push(name);
+            return ['192.0.2.3'];
+        },
+        queryDirectlyUDP: async (name, ip) => {
+            queried.push(ip);
+            return ip === '192.0.2.10' ? {
+                flags: 0, answers: [],
+                authorities: nsNames.map(data => ({ name: domain, type: 'NS', data })),
+                additionals: [
+                    { name: 'ns1.child.example.com', type: 'AAAA', data: '2001:db8::1' },
+                    { name: 'ns.external.net', type: 'A', data: '192.0.2.99' },
+                    { name: 'ns2.child.example.com', type: 'A', data: '192.0.2.2' },
+                    { name: 'ns1.child.example.com', type: 'A', data: '192.0.2.1' }
+                ]
+            } : { error: 'TIMEOUT' };
+        }
+    });
+    assert.deepEqual(queried, ['192.0.2.10', '192.0.2.2', '2001:db8::1', '192.0.2.1', '192.0.2.3']);
+    assert.deepEqual(resolved, ['ns.external.net']);
+    assert.equal(result[0].status, 'DELEGATED');
+    assert.deepEqual(result.slice(1).map(log => log.status), Array(4).fill('LAME_DELEGATION_TIMEOUT'));
+});
+
 test('ドメイン入力を正規化し、不正な値を拒否する', () => {
     assert.equal(normalizeUserDomain(' HTTPS://Example.COM/ '), 'example.com');
     assert.equal(normalizeUserDomain('a.example.com.'), 'a.example.com');

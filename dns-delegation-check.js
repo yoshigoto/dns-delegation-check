@@ -12,7 +12,8 @@ import {
     hasParentChildRelationship,
     isInBailiwickGlue,
     classifyReferralAddressRecords,
-    getReferralAddressRecords,
+    getReferralNameserverCandidates,
+    isValidReferral,
     createQueryBudget,
     queryDirectlyUDP,
     resolveServerIPs,
@@ -349,7 +350,9 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
                 break;
             }
 
-            const validNsRecords = authorities.filter(r => r.type === 'NS' && normalizeDnsName(r.name) === qname);
+            const validNsRecords = authorities.filter(r => r.type === 'NS' && isValidReferral(
+                r.name, currentZone, qname, { queryNamePolicy: 'exact', requireBelowServerZone: false }
+            ));
             if (validNsRecords.length > 0) {
                 delegation = { nsRecords: validNsRecords, additionals: res.additionals || [], serverIp, nextZone: qname };
                 break;
@@ -433,10 +436,12 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
             continue;
         }
 
-        const nextNsNames = delegation.nsRecords.map(record => normalizeDnsName(record.data));
-        const inBailiwickGlueRecords = getReferralAddressRecords(
-            delegation.additionals, nextNsNames, delegation.nextZone, REFERRAL_GLUE_POLICY, currentZone
+        const referral = getReferralNameserverCandidates(
+            delegation.nsRecords, delegation.additionals, delegation.nextZone,
+            { gluePolicy: REFERRAL_GLUE_POLICY, serverZone: currentZone }
         );
+        const nextNsNames = referral.candidates.map(candidate => candidate.nsName);
+        const inBailiwickGlueRecords = referral.addressRecords;
         const inBailiwickGlueNames = new Set(inBailiwickGlueRecords.map(record => normalizeDnsName(record.name)));
         const glueIPs = inBailiwickGlueRecords.map(record => record.data);
         const nextServerNameMap = {};
@@ -650,7 +655,9 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
         const answers = res.answers || [];
         const authorities = res.authorities || [];
         const additionals = res.additionals || [];
-        const nsRecords = authorities.filter(r => r.type === 'NS' && hasParentChildRelationship(domain, r.name));
+        const nsRecords = authorities.filter(r => r.type === 'NS' && isValidReferral(
+            r.name, currentZone, domain, { queryNamePolicy: 'related', requireBelowServerZone: false }
+        ));
         if (currentDepth === 1) {
             logEntry.glueInfo = buildGlueInfo(additionals, nsRecords, currentZone, serverIp, logEntry.serverName);
         }
@@ -748,21 +755,19 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
             logEntry.detail = `AUTHORITY SECTION に ${nsRecords.length} 個の NS レコード。IP アドレスを以下に列挙。${cacheNote}`;
             results.push(logEntry);
 
-            const currentNSNames = nsRecords.map(r => normalizeDnsName(r.data));
             const delegatedZone = normalizeDnsName(nsRecords[0].name);
+            const referral = getReferralNameserverCandidates(nsRecords, additionals, delegatedZone, {
+                gluePolicy: REFERRAL_GLUE_POLICY, serverZone: currentZone
+            });
+            const currentNSNames = referral.candidates.map(candidate => candidate.nsName);
             logEntry.rfc9471 = summarizeRfc9471Referral(nsRecords, additionals, res.retryFrom, currentZone);
 
             let nextGlueMap = {};
             let nextServerIPs = [];
             let nextServerNameMap = {};
 
-            for (const ns of nsRecords) {
-                const nsKey = normalizeDnsName(ns.data);
+            for (const { nsRecord: ns, nsName: nsKey, addressRecords: matchedGlues } of referral.candidates) {
                 nextGlueMap[nsKey] = [];
-
-                const matchedGlues = getReferralAddressRecords(
-                    additionals, [nsKey], delegatedZone, REFERRAL_GLUE_POLICY, currentZone
-                );
                 matchedGlues.forEach(g => {
                     nextGlueMap[nsKey].push(g.data);
                     nextServerIPs.push(g.data);
