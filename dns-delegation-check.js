@@ -14,7 +14,8 @@ import {
     classifyReferralAddressRecords,
     getReferralAddressRecords,
     queryDirectlyUDP,
-    resolveServerIPs
+    resolveServerIPs,
+    resolveRecordFromServer
 } from 'dns-self-resolver';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -203,17 +204,10 @@ function buildAddressSelectionNotes(blockedServerIPs, truncatedServerIPs, server
 }
 
 async function resolveAuthoritativeServerIPs(name, serverIp, dnsResponseCache, queryUDP) {
-    const responses = await Promise.all(['A', 'AAAA'].map(async type =>
-        queryUDP(name, serverIp, dnsResponseCache, type)
-    ));
-    return [...new Set(responses.flatMap(response =>
-        (response.error ? [] : (response.answers || []))
-            .filter(record =>
-                (record.type === 'A' || record.type === 'AAAA') &&
-                normalizeDnsName(record.name) === normalizeDnsName(name)
-            )
-            .map(record => record.data)
-    ))];
+    const addresses = await resolveRecordFromServer(name, serverIp, ['A', 'AAAA'], dnsResponseCache, {
+        queryDirectlyUDP: queryUDP
+    });
+    return [...new Set(addresses)];
 }
 
 function getMinimizedQnames(domain) {
