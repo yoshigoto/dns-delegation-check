@@ -3,7 +3,34 @@ import dgram from 'node:dgram';
 import net from 'node:net';
 import test from 'node:test';
 import dnsPacket from 'dns-packet';
-import { queryDirectlyUDP } from 'dns-self-resolver';
+import {
+    isPublicDnsServerAddress, queryDirectlyUDP,
+    resolveHostnameIPv4Self, resolveServerIPs
+} from 'dns-self-resolver';
+
+test('固定依存先は非公開のみのNS回答を再利用し診断結果も維持する', async () => {
+    let queries = 0;
+    const dependencies = {
+        isAllowedServerIP: isPublicDnsServerAddress,
+        queryDirectlyUDP: async (name, ip, cache, type) => {
+            queries++;
+            assert.equal(isPublicDnsServerAddress(ip), true);
+            return {
+                answers: type === 'A' ? [{ name, type, data: '10.0.0.53', ttl: 30 }] : [],
+                flags: dnsPacket.AUTHORITATIVE_ANSWER
+            };
+        }
+    };
+    assert.equal(await resolveServerIPs('blocked.dependency.test', dependencies), null);
+    const completed = queries;
+    assert.equal(await resolveHostnameIPv4Self('blocked.dependency.test', dependencies), null);
+    assert.equal(await resolveServerIPs('blocked.dependency.test', dependencies), null);
+    assert.equal(queries, completed);
+    assert.deepEqual(await resolveServerIPs('blocked.dependency.test', {
+        ...dependencies, includeBlockedAddresses: true
+    }), ['10.0.0.53']);
+    assert.equal(queries, completed);
+});
 
 async function startDnsStub({ respondToUdp = true, truncateUdp = false } = {}) {
     const tcpServer = net.createServer(socket => {
