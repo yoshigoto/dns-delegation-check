@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import dgram from 'node:dgram';
 import test from 'node:test';
 import { isPublicDnsServerAddress, resolveServerIPs, ROOT_SERVER_BOOTSTRAP_IP } from 'dns-self-resolver';
 
@@ -113,7 +114,8 @@ test('委任追跡は 1 referral あたりの NS アドレス数を制限する'
     assert.match(result[0].addressSelectionNotes[0], /上限 \(32\) を超えた/);
 });
 
-test('DNS 問い合わせ数の上限に達すると以降の問い合わせを行わない', async () => {
+test('DNS 送信数の上限に達すると以降の送信を行わない', async t => {
+    t.mock.method(dgram, 'createSocket', () => assert.fail('上限到達後にソケットを作成しました'));
     const queryBudget = { remaining: 0, exhausted: false };
     const result = await traceDomain(
         'child.example.com',
@@ -126,7 +128,7 @@ test('DNS 問い合わせ数の上限に達すると以降の問い合わせを�
         {
             queryBudget,
             resolveServerIPs: async () => null,
-            queryDirectlyUDP: async () => assert.fail('上限到達後に問い合わせました')
+            isAllowedServerIP: isTestNetAllowed
         }
     );
 

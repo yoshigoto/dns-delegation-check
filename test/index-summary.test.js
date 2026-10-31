@@ -408,6 +408,12 @@ test('ログツリーは親子関係を保ち、入力ログを変更しない',
 test('verdictがゾーン頂点探索と委任追跡の結果を概要表示する', () => {
     assert.equal(renderVerdict([
         { status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' },
+        { status: 'SUCCESS', detail: '取得済みの回答です。' },
+        { status: 'QUERY_LIMIT_EXCEEDED', detail: '送信数の上限です。' }
+    ]), '⚠️  要確認: DNS メッセージ送信数が上限に達したため、検査結果は不完全です');
+
+    assert.equal(renderVerdict([
+        { status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' },
         { status: 'SUCCESS', detail: '委任は正常です。' }
     ]), '✅  正常: 正しく委任されています');
 

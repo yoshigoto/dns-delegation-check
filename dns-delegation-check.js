@@ -13,6 +13,7 @@ import {
     isInBailiwickGlue,
     classifyReferralAddressRecords,
     getReferralAddressRecords,
+    createQueryBudget,
     queryDirectlyUDP,
     resolveServerIPs,
     resolveRecordFromServer
@@ -20,7 +21,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// 1 リクエストあたりの DNS 問い合わせ数の上限 (一般的なドメインは 50〜150 件程度)。
+// 再送・TCP フォールバックを含む、1 リクエストあたりの DNS メッセージ送信数の上限。
 const MAX_QUERIES_PER_TRACE = 1000;
 // 1 つの referral から追跡する NS アドレス数の上限。
 const MAX_NS_ADDRESSES_PER_REFERRAL = 32;
@@ -232,27 +233,21 @@ function createQueryFunction(dependencies) {
                 detail: `${serverIp} はグローバルユニキャストアドレスではないため、問い合わせを行いません。`
             });
         }
-        if (budget) {
-            if (budget.remaining <= 0) {
-                budget.exhausted = true;
-                return Promise.resolve({
-                    error: 'QUERY_LIMIT_EXCEEDED', domain: name, serverIp, qType, retryable: false,
-                    detail: `1 回の検査で実行できる DNS 問い合わせ数の上限 (${MAX_QUERIES_PER_TRACE}) に達しました。`
-                });
-            }
-            budget.remaining--;
-        }
         const queryOptions = typeof options === 'boolean' ? { useEdns: options } : { ...(options || {}) };
-        return query(name, serverIp, cache, qType, {
+        return Promise.resolve(query(name, serverIp, cache, qType, {
             ...queryOptions,
             isAllowedServerIP,
+            ...(budget ? { queryBudget: budget } : {}),
             ...(dependencies.signal ? { signal: dependencies.signal } : {})
-        });
+        })).then(response => response?.error === 'QUERY_LIMIT_EXCEEDED' ? {
+            ...response,
+            detail: `1 回の検査で送信できる DNS メッセージ数の上限 (${MAX_QUERIES_PER_TRACE}) に達しました。`
+        } : response);
     };
 }
 
 function isQueryBudgetExhausted(dependencies) {
-    return !!dependencies.queryBudget && dependencies.queryBudget.remaining <= 0;
+    return dependencies.queryBudget?.exhausted === true;
 }
 
 function createResolverDependencies(dependencies, dnsResponseCache, queryUDP) {
@@ -862,7 +857,7 @@ async function handleTrace(req, res, dnsDependencies) {
         ...dnsDependencies,
         signal: abortController.signal,
         isAllowedServerIP: isPublicServerIP,
-        queryBudget: { remaining: MAX_QUERIES_PER_TRACE, exhausted: false }
+        queryBudget: createQueryBudget(MAX_QUERIES_PER_TRACE)
     };
 
     try {
@@ -916,7 +911,7 @@ async function handleTrace(req, res, dnsDependencies) {
                 server: '',
                 parent: null,
                 status: 'QUERY_LIMIT_EXCEEDED',
-                detail: `DNS 問い合わせ数が上限 (${MAX_QUERIES_PER_TRACE}) に達したため、検査を途中で打ち切りました。結果は不完全です。`,
+                detail: `DNS メッセージ送信数が上限 (${MAX_QUERIES_PER_TRACE}) に達したため、検査を途中で打ち切りました。結果は不完全です。`,
                 nsMatch: null,
                 glueMatch: null
             });

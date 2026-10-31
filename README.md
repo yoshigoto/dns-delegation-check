@@ -52,7 +52,7 @@ https://www.on-link.jp/dns-delegation-check/?domain=example.com
 | `LAME_DELEGATION_TIMEOUT` | DNS サーバーから応答がない |
 | `LAME_DELEGATION_MAX_DEPTH` | 委任チェーンが追跡上限に達した |
 | `NETWORK_ERROR` | DNS 通信または応答の処理中にエラーが発生した |
-| `QUERY_LIMIT_EXCEEDED` | 1 回の検査で実行できる DNS 問い合わせ数の上限に達した |
+| `QUERY_LIMIT_EXCEEDED` | 1 回の検査で送信できる DNS メッセージ数の上限に達した |
 | `ZONE_APEX_LOOKUP_TIMEOUT` | ゾーン頂点の探索が 30 秒以内に完了しなかった |
 | `CNAME_FOUND` | 入力名が CNAME のため、委任検査を終了した |
 | `DNAME_FOUND` | DNAME が見つかり、ゾーン頂点を確定できなかった |
@@ -73,7 +73,7 @@ nvm use
 
 リポジトリのルートで依存パッケージをインストールし、サーバーを起動します。
 
-DNS の名前解決ライブラリ `dns-self-resolver` は、referral 分類 API と `in-domain-only` 方針を追加したバージョン `1.4.0` のコミット `928f2687b235fa94520a3b9c6fe6048e112d1a4c` に固定しています。新しいタグはまだ公開していません。非公開アドレスのみの最終回答も、TTL 内は再問い合わせせず診断に利用できます。
+DNS の名前解決ライブラリ `dns-self-resolver` は、送信予算 API を追加したバージョン `1.5.0` のコミット `38b305e1ba5b7ec41917942ef3373448e59ba8d8` に固定しています。この変更のタグはまだ公開していません。referral 分類と `in-domain-only` 方針、および非公開アドレスのみの最終回答を TTL 内は再問い合わせせず診断に利用する動作も維持しています。
 
 ```bash
 npm ci
@@ -162,7 +162,7 @@ Content-Type: application/json
 - **内部ネットワークへの問い合わせ防止（SSRF 対策）**: 委任先 NS の Glue や名前解決で得た IP アドレスが、グローバルユニキャストではない場合は問い合わせず、`LAME_DELEGATION_NON_PUBLIC_ADDRESS` として記録します。この制限は TCP への再試行を含む DNS 問い合わせ先に適用されます。
   宛先判定は `dns-self-resolver` の `isPublicDnsServerAddress` を選択して共通化しています。IPv6 は `2000::/3` 内から特殊用途範囲と `%` 付きアドレスを除外し、入れ子の NS 名前解決にも同じポリシーを適用します。
   `resolveServerIPs` の `includeBlockedAddresses` を使い、拒否された最終アドレスも診断に残します。解決途中の宛先制限は緩めず、拒否された glue が候補上限を占有しないようにします。
-- **問い合わせ数の制限**: 1 回の検査につき最大 1000 件、1 つの referral につき最大 32 個の NS アドレスを追跡します。問い合わせ数の上限に達すると `QUERY_LIMIT_EXCEEDED` を記録し、結果が不完全であることを示します。
+- **送信数の制限**: 1 回の検査につき DNS メッセージを最大 1000 回送信します。ゾーン頂点探索、委任追跡、Glue 比較の A/AAAA 取得、入れ子の NS 自己解決で同じ `dns-self-resolver` の `queryBudget` を共有し、EDNS / 0x20 再送と TCP フォールバックも数えます。キャッシュ利用と同一検査内で合流した問い合わせの重複は数えません。1001 回目の送信を拒否すると `QUERY_LIMIT_EXCEEDED` を記録し、結果が不完全であることを示します。バイト数や OS による TCP 再送の制限ではありません。1 referral あたり最大 32 個の NS アドレス、自己解決の探索量・深さ・時間・同時実行数の既存制限も維持します。
 - **レート・同時実行制限**: クライアントごとに 1 分間 10 件、同時 2 件まで、サーバー全体で同時 8 件までです。アプリはループバックからの転送だけを信頼するため、リバースプロキシから適切な `X-Forwarded-For` を設定してください。
 - **HTTP セキュリティヘッダー**: CSP、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` などを付与し、`X-Powered-By` は返しません。
 - **XSS 対策**: DNS 応答由来の文字列は HTML として挿入せず、DOM のテキスト API で表示します。

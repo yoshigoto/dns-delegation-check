@@ -4,9 +4,10 @@ import net from 'node:net';
 import test from 'node:test';
 import dnsPacket from 'dns-packet';
 import {
-    isPublicDnsServerAddress, queryDirectlyUDP,
+    createQueryBudget, isPublicDnsServerAddress, queryDirectlyUDP,
     resolveHostnameIPv4Self, resolveServerIPs
 } from 'dns-self-resolver';
+import { traceDomain } from '../dns-delegation-check.js';
 
 test('固定依存先は非公開のみのNS回答を再利用し診断結果も維持する', async () => {
     let queries = 0;
@@ -32,7 +33,8 @@ test('固定依存先は非公開のみのNS回答を再利用し診断結果も
     assert.equal(queries, completed);
 });
 
-async function startDnsStub({ respondToUdp = true, truncateUdp = false } = {}) {
+async function startDnsStub({ respondToUdp = true, truncateUdp = false, respond = makeResponse } = {}) {
+    const queries = [];
     const tcpServer = net.createServer(socket => {
         let received = Buffer.alloc(0);
         socket.on('data', chunk => {
@@ -43,7 +45,8 @@ async function startDnsStub({ respondToUdp = true, truncateUdp = false } = {}) {
             if (received.length < messageLength + 2) return;
 
             const query = dnsPacket.streamDecode(received);
-            const response = makeResponse(query);
+            queries.push({ ...query, transport: 'tcp' });
+            const response = respond(query);
             socket.end(dnsPacket.streamEncode(response));
         });
     });
@@ -56,6 +59,7 @@ async function startDnsStub({ respondToUdp = true, truncateUdp = false } = {}) {
     const udpServer = dgram.createSocket('udp4');
     udpServer.on('message', (message, remote) => {
         const query = dnsPacket.decode(message);
+        queries.push({ ...query, transport: 'udp' });
         if (!respondToUdp) return;
         const response = truncateUdp
             ? {
@@ -64,7 +68,7 @@ async function startDnsStub({ respondToUdp = true, truncateUdp = false } = {}) {
                 flags: dnsPacket.TRUNCATED_RESPONSE,
                 questions: query.questions
             }
-            : makeResponse(query);
+            : respond(query);
         udpServer.send(dnsPacket.encode(response), remote.port, remote.address);
     });
     try {
@@ -79,6 +83,7 @@ async function startDnsStub({ respondToUdp = true, truncateUdp = false } = {}) {
 
     return {
         port,
+        queries,
         close: async () => {
             await Promise.all([
                 new Promise(resolve => udpServer.close(resolve)),
@@ -175,5 +180,53 @@ test('dns-self-resolver はタイムアウトと AbortSignal を結果として�
             assert.equal(response.error, 'ABORTED');
             assert.equal(response.transport, 'udp');
         });
+    });
+});
+
+test('委任追跡の共有予算は実UDP/TCP送信を数え、残り0でも応答キャッシュを使う', async () => {
+    const respond = query => {
+        const { name, type } = query.questions[0];
+        return {
+            type: 'response', id: query.id, questions: query.questions,
+            flags: dnsPacket.AUTHORITATIVE_ANSWER,
+            answers: [{ name, type, ttl: 30,
+                data: type === 'NS' ? 'ns.budget.integration.test' : type === 'A' ? '127.0.0.1' : '::1' }]
+        };
+    };
+    await withDnsStub({ truncateUdp: true, respond }, async ({ port, queries }) => {
+        const policy = () => true;
+        const cache = new Map();
+        const query = (name, ip, receivedCache, type, options) =>
+            queryDirectlyUDP(name, ip, receivedCache, type, {
+                ...options, udpPort: port, tcpPort: port, timeoutMs: 1000, use0x20: false
+            });
+        const queryBudget = createQueryBudget(3);
+        await traceDomain('budget.integration.test', ['127.0.0.1'], cache,
+            null, 1, ['ns.budget.integration.test'],
+            { 'ns.budget.integration.test': ['127.0.0.1', '::1'] }, {
+                queryBudget, isAllowedServerIP: policy, queryDirectlyUDP: query,
+                resolveServerIPs: async () => null
+            });
+        assert.deepEqual(queries.map(query => query.transport), ['udp', 'tcp', 'udp']);
+        assert.equal(queryBudget.remaining, 0);
+        assert.equal(queryBudget.exhausted, true);
+
+        for (const type of ['NS', 'A', 'AAAA']) {
+            const name = type === 'NS' ? 'budget.integration.test' : 'ns.budget.integration.test';
+            assert.equal((await query(name, '127.0.0.1', cache, type,
+                { isAllowedServerIP: policy })).error, undefined);
+        }
+        const completedSends = queries.length;
+        const emptyBudget = createQueryBudget(0);
+        const result = await traceDomain('budget.integration.test', ['127.0.0.1'], cache,
+            null, 1, ['ns.budget.integration.test'],
+            { 'ns.budget.integration.test': ['127.0.0.1', '::1'] }, {
+                queryBudget: emptyBudget, isAllowedServerIP: policy, queryDirectlyUDP: query,
+                resolveServerIPs: async () => assert.fail('キャッシュした直接取得を優先する')
+            });
+        assert.equal(result[0].status, 'SUCCESS');
+        assert.equal(result[0].glueMatch.success, true);
+        assert.equal(emptyBudget.exhausted, false);
+        assert.equal(queries.length, completedSends);
     });
 });
