@@ -25,7 +25,6 @@ const MAX_CONCURRENT_TRACES = 8;
 const MAX_CONCURRENT_TRACES_PER_CLIENT = 2;
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS_PER_CLIENT = 10;
-const allowResolvedServerIP = () => true;
 
 const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const inlineScriptHashes = [...indexHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)]
@@ -286,8 +285,8 @@ function isQueryBudgetExhausted(dependencies) {
 function createResolverDependencies(dependencies, dnsResponseCache, queryUDP) {
     return {
         ...dependencies, dnsResponseCache, queryDirectlyUDP: queryUDP,
-        // Keep resolved addresses available for diagnostics; queryUDP still enforces the destination policy.
-        isAllowedServerIP: allowResolvedServerIP
+        isAllowedServerIP: getServerAddressPolicy(dependencies),
+        includeBlockedAddresses: true
     };
 }
 

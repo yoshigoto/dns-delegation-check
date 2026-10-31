@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isPublicDnsServerAddress } from 'dns-self-resolver';
+import { isPublicDnsServerAddress, resolveServerIPs, ROOT_SERVER_BOOTSTRAP_IP } from 'dns-self-resolver';
 
 import {
     app,
@@ -173,7 +173,8 @@ test('名前解決で得た非グローバルアドレスもゾーン頂点探�
         resolveServerIPs: async (name, dependencies) => {
             if (name === 'a.root-servers.net') return ['192.0.2.1'];
 
-            assert.equal(dependencies.isAllowedServerIP('127.0.0.1'), true);
+            assert.equal(dependencies.isAllowedServerIP('127.0.0.1'), false);
+            assert.equal(dependencies.includeBlockedAddresses, true);
             assert.equal(
                 (await dependencies.queryDirectlyUDP('nested.example', '127.0.0.1', new Map(), 'A')).error,
                 'BLOCKED_ADDRESS'
@@ -215,7 +216,8 @@ test('名前解決で得た混在アドレスは非グローバルアドレス�
         {
             isAllowedServerIP: isTestNetAllowed,
             resolveServerIPs: async (name, dependencies) => {
-                assert.equal(dependencies.isAllowedServerIP('127.0.0.1'), true);
+                assert.equal(dependencies.isAllowedServerIP('127.0.0.1'), false);
+                assert.equal(dependencies.includeBlockedAddresses, true);
                 return ['127.0.0.1', '192.0.2.20'];
             },
             queryDirectlyUDP: async (domain, serverIp) => {
@@ -237,6 +239,49 @@ test('名前解決で得た混在アドレスは非グローバルアドレス�
     assert.ok(result.some(log =>
         log.status === 'LAME_DELEGATION_NON_PUBLIC_ADDRESS' && log.server === '127.0.0.1'
     ));
+});
+
+test('実リゾルバーの拒否候補は上限を消費せず最終非公開アドレスだけ診断に残す', async () => {
+    const queriedServers = [];
+    const allowed = ip => isPublicDnsServerAddress(ip);
+    const query = async (name, ip, cache, type) => {
+        queriedServers.push(ip);
+        assert.equal(allowed(ip), true, ip);
+        if (name === 'child.integration.test') {
+            return {
+                authorities: [{
+                    name: 'child.integration.test', type: 'NS', data: 'host.diagnostic-integration.test'
+                }]
+            };
+        }
+        if (ip === ROOT_SERVER_BOOTSTRAP_IP) {
+            return {
+                authorities: [{ name: 'diagnostic-integration.test', type: 'NS', data: 'ns.diagnostic-integration.test' }],
+                additionals: [
+                    ...Array.from({ length: 20 }, (_, index) => ({
+                        name: 'ns.diagnostic-integration.test', type: 'A', data: `10.0.0.${index + 1}`
+                    })),
+                    { name: 'ns.diagnostic-integration.test', type: 'A', data: '8.8.8.8' }
+                ]
+            };
+        }
+        return {
+            answers: type === 'A' ? [{ name, type, data: '127.0.0.1', ttl: 30 }] : [],
+            flags: 1024
+        };
+    };
+    const result = await traceDomain('child.integration.test', ['8.8.4.4'], new Map(),
+        null, 1, [], {}, {
+            queryDirectlyUDP: query,
+            resolveServerIPs,
+            isAllowedServerIP: allowed,
+            resolutionLimits: { maxCandidatesPerReferral: 1 }
+        });
+    assert.ok(result.some(log =>
+        log.status === 'LAME_DELEGATION_NON_PUBLIC_ADDRESS' && log.server === '127.0.0.1'
+    ));
+    assert.ok(!result.some(log => log.status === 'LAME_DELEGATION_NO_NS_IP_ADDRESS'));
+    assert.equal(queriedServers.filter(ip => ip === '8.8.8.8').length, 2);
 });
 
 async function withServer(callback) {
