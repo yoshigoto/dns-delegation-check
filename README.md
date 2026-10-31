@@ -71,7 +71,7 @@ nvm use
 
 リポジトリのルートで依存パッケージをインストールし、サーバーを起動します。
 
-DNS の名前解決ライブラリ `dns-self-resolver` は、公開 DNS 向け宛先ポリシーを追加したバージョン `1.3.0` のコミット `23493b3794fc612a03fa32178862b6ee6effb909` に固定しています。
+DNS の名前解決ライブラリ `dns-self-resolver` は、公開 DNS 向け宛先ポリシーと診断用の最終アドレス取得に対応したバージョン `1.3.0` のコミット `d58a2cd018fd873262a902de9a86a1e12fc84eea` に固定しています。
 
 ```bash
 npm ci
@@ -159,6 +159,7 @@ Content-Type: application/json
 
 - **内部ネットワークへの問い合わせ防止（SSRF 対策）**: 委任先 NS の Glue や名前解決で得た IP アドレスが、グローバルユニキャストではない場合は問い合わせず、`LAME_DELEGATION_NON_PUBLIC_ADDRESS` として記録します。この制限は TCP への再試行を含む DNS 問い合わせ先に適用されます。
   宛先判定は `dns-self-resolver` の `isPublicDnsServerAddress` を選択して共通化しています。IPv6 は `2000::/3` 内から特殊用途範囲と `%` 付きアドレスを除外し、入れ子の NS 名前解決にも同じポリシーを適用します。
+  `resolveServerIPs` の `includeBlockedAddresses` を使い、拒否された最終アドレスも診断に残します。解決途中の宛先制限は緩めず、拒否された glue が候補上限を占有しないようにします。
 - **問い合わせ数の制限**: 1 回の検査につき最大 1000 件、1 つの referral につき最大 32 個の NS アドレスを追跡します。問い合わせ数の上限に達すると `QUERY_LIMIT_EXCEEDED` を記録し、結果が不完全であることを示します。
 - **レート・同時実行制限**: クライアントごとに 1 分間 10 件、同時 2 件まで、サーバー全体で同時 8 件までです。アプリはループバックからの転送だけを信頼するため、リバースプロキシから適切な `X-Forwarded-For` を設定してください。
 - **HTTP セキュリティヘッダー**: CSP、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` などを付与し、`X-Powered-By` は返しません。
