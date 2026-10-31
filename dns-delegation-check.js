@@ -11,6 +11,8 @@ import {
     isSubdomainOrEqual,
     hasParentChildRelationship,
     isInBailiwickGlue,
+    classifyReferralAddressRecords,
+    getReferralAddressRecords,
     queryDirectlyUDP,
     resolveServerIPs
 } from 'dns-self-resolver';
@@ -25,6 +27,7 @@ const MAX_CONCURRENT_TRACES = 8;
 const MAX_CONCURRENT_TRACES_PER_CLIENT = 2;
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS_PER_CLIENT = 10;
+const REFERRAL_GLUE_POLICY = 'in-domain-only';
 
 const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const inlineScriptHashes = [...indexHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)]
@@ -164,30 +167,6 @@ function summarizeRfc9471Referral(nsRecords, additionals, retryFrom = '', parent
         : '';
 
     return [transportNote, inDomainNote, siblingNote, unrelatedNote].filter(Boolean).join('\r');
-}
-
-function classifyReferralAddressRecords(additionals, nsNames, delegatedZone, parentZone = normalizeDnsName(delegatedZone).split('.').slice(1).join('.')) {
-    const addressRecords = additionals.filter(record =>
-        (record.type === 'A' || record.type === 'AAAA') &&
-        nsNames.includes(normalizeDnsName(record.name))
-    );
-    const inDomainGlueRecords = addressRecords.filter(record =>
-        isInBailiwickGlue(record, nsNames, delegatedZone)
-    );
-    const siblingGlueRecords = addressRecords.filter(record =>
-        !inDomainGlueRecords.includes(record) &&
-        (!parentZone || isSubdomainOrEqual(record.name, parentZone))
-    );
-    const unrelatedAddressRecords = addressRecords.filter(record =>
-        !inDomainGlueRecords.includes(record) && !siblingGlueRecords.includes(record)
-    );
-
-    return { inDomainGlueRecords, siblingGlueRecords, unrelatedAddressRecords };
-}
-
-function getReferralAddressRecords(additionals, nsNames, delegatedZone, parentZone) {
-    const { inDomainGlueRecords } = classifyReferralAddressRecords(additionals, nsNames, delegatedZone, parentZone);
-    return inDomainGlueRecords;
 }
 
 function buildGlueInfo(additionals, nsRecords, parentZone, server, serverName) {
@@ -466,7 +445,9 @@ async function getZoneApex(domain, dnsResponseCache, dependencies = {}) {
         }
 
         const nextNsNames = delegation.nsRecords.map(record => normalizeDnsName(record.data));
-        const inBailiwickGlueRecords = getReferralAddressRecords(delegation.additionals, nextNsNames, delegation.nextZone, currentZone);
+        const inBailiwickGlueRecords = getReferralAddressRecords(
+            delegation.additionals, nextNsNames, delegation.nextZone, REFERRAL_GLUE_POLICY, currentZone
+        );
         const inBailiwickGlueNames = new Set(inBailiwickGlueRecords.map(record => normalizeDnsName(record.name)));
         const glueIPs = inBailiwickGlueRecords.map(record => record.data);
         const nextServerNameMap = {};
@@ -790,7 +771,9 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
                 const nsKey = normalizeDnsName(ns.data);
                 nextGlueMap[nsKey] = [];
 
-                const matchedGlues = getReferralAddressRecords(additionals, [nsKey], delegatedZone, currentZone);
+                const matchedGlues = getReferralAddressRecords(
+                    additionals, [nsKey], delegatedZone, REFERRAL_GLUE_POLICY, currentZone
+                );
                 matchedGlues.forEach(g => {
                     nextGlueMap[nsKey].push(g.data);
                     nextServerIPs.push(g.data);
