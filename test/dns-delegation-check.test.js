@@ -1137,6 +1137,94 @@ test('Glue 比較では子ゾーン権威サーバーから得た NS の IP ア�
     assert.equal(result[0].glueMatch.success, true);
 });
 
+test('共通APIのA/AAAA取得は並列で実行し重複・別名の回答を除いてGlue比較する', async () => {
+    const cache = new Map();
+    const controller = new AbortController();
+    const policy = ip => ip === '192.0.2.20';
+    const budget = { remaining: 3, exhausted: false };
+    const pending = new Map();
+    const calls = [];
+    const result = await traceDomain('child.example.com', ['192.0.2.20'], cache,
+        null, 1, ['ns1.child.example.com'],
+        { 'ns1.child.example.com': ['192.0.2.20', '2001:db8::20'] }, {
+            signal: controller.signal,
+            isAllowedServerIP: policy,
+            queryBudget: budget,
+            resolveServerIPs: async () => assert.fail('直接取得を優先する'),
+            queryDirectlyUDP: async (name, ip, receivedCache, type, options) => {
+                assert.equal(ip, '192.0.2.20');
+                assert.equal(receivedCache, cache);
+                assert.equal(options.signal, controller.signal);
+                assert.equal(options.isAllowedServerIP, policy);
+                calls.push(type);
+                if (type === 'NS') return {
+                    flags: 1024,
+                    answers: [{ name: 'child.example.com', type, data: 'ns1.child.example.com' }]
+                };
+                return new Promise(resolve => {
+                    pending.set(type, resolve);
+                    if (pending.size !== 2) return;
+                    for (const [qType, finish] of pending) {
+                        const data = qType === 'A' ? '192.0.2.20' : '2001:db8::20';
+                        finish({ answers: [
+                            { name: 'NS1.Child.Example.COM.', type: qType, data },
+                            { name, type: qType, data },
+                            { name: 'other.example.com', type: qType, data: '192.0.2.99' }
+                        ] });
+                    }
+                });
+            }
+        });
+    assert.deepEqual(calls, ['NS', 'A', 'AAAA']);
+    assert.equal(budget.remaining, 0);
+    assert.equal(budget.exhausted, false);
+    assert.equal(result[0].status, 'SUCCESS');
+    assert.equal(result[0].glueMatch.success, true);
+});
+
+test('共通APIのA/AAAA取得でも予算超過時は送信せず取得済みの回答を使う', async () => {
+    const budget = { remaining: 2, exhausted: false };
+    const calls = [];
+    const result = await traceDomain('child.example.com', ['192.0.2.20'], new Map(),
+        null, 1, ['ns1.child.example.com'],
+        { 'ns1.child.example.com': ['192.0.2.20'] }, {
+            queryBudget: budget,
+            isAllowedServerIP: ip => ip === '192.0.2.20',
+            resolveServerIPs: async () => assert.fail('取得済みのA回答を使う'),
+            queryDirectlyUDP: async (name, ip, cache, type) => {
+                calls.push(type);
+                return type === 'NS'
+                    ? { flags: 1024, answers: [{ name, type, data: 'ns1.child.example.com' }] }
+                    : { answers: [{ name, type, data: '192.0.2.20' }] };
+            }
+        });
+    assert.deepEqual(calls, ['NS', 'A']);
+    assert.equal(budget.remaining, 0);
+    assert.equal(budget.exhausted, true);
+    assert.equal(result[0].glueMatch.success, true);
+});
+
+test('共通APIへ渡す問い合わせ関数は途中で拒否されたA/AAAA宛先にも送信しない', async () => {
+    let allowed = true;
+    const budget = { remaining: 3, exhausted: false };
+    const calls = [];
+    const result = await traceDomain('child.example.com', ['192.0.2.20'], new Map(),
+        null, 1, ['ns1.child.example.com'],
+        { 'ns1.child.example.com': ['192.0.2.20'] }, {
+            queryBudget: budget,
+            isAllowedServerIP: () => allowed,
+            resolveServerIPs: async () => null,
+            queryDirectlyUDP: async (name, ip, cache, type) => {
+                calls.push(type);
+                allowed = false;
+                return { flags: 1024, answers: [{ name, type, data: 'ns1.child.example.com' }] };
+            }
+        });
+    assert.deepEqual(calls, ['NS']);
+    assert.equal(budget.remaining, 2);
+    assert.equal(result[0].status, 'LAME_DELEGATION_NO_IP_ADDRESS');
+});
+
 test('委任先の IP アドレス不在と Glue の IP アドレス不一致を検出する', async () => {
     const noChildIP = await traceDomain(
         'child.example.com',
