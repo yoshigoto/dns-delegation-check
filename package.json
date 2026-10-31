@@ -4,7 +4,7 @@
   },
   "dependencies": {
     "dns-packet": "^5.6.1",
-    "dns-self-resolver": "git+https://github.com/yoshigoto/dns-self-resolver.git#v1.3.0",
+    "dns-self-resolver": "git+https://github.com/yoshigoto/dns-self-resolver.git#928f2687b235fa94520a3b9c6fe6048e112d1a4c",
     "express": "^5.3.0"
   },
   "type": "module",

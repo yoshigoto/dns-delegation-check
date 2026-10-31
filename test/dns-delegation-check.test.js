@@ -149,6 +149,61 @@ test('グルー情報はルートを親とする sibling domain を分類する'
     assert.equal(result[0].glueInfo.records[0].classification, 'sibling domain');
 });
 
+test('ルートreferralは共通分類で表示し、in-domain-onlyで採用とNS自己解決を分離する', async () => {
+    const queriedServers = [];
+    const resolvedNames = [];
+    const result = await getZoneApex('com', new Map(), {
+        queryDirectlyUDP: async (name, ip) => {
+            queriedServers.push(ip);
+            if (ip === '192.0.2.1') {
+                return {
+                    flags: 0,
+                    authorities: [
+                        { type: 'NS', name: 'com', data: 'ns.com' },
+                        { type: 'NS', name: 'com', data: 'a.gtld-servers.net' }
+                    ],
+                    additionals: [
+                        { type: 'A', name: 'a.gtld-servers.net', data: '192.0.2.99' },
+                        { type: 'A', name: 'ns.com', data: '192.0.2.2' }
+                    ]
+                };
+            }
+            assert.ok(['192.0.2.2', '192.0.2.3'].includes(ip));
+            return {
+                flags: 1024,
+                answers: [{ type: 'NS', name, data: 'ns.com' }]
+            };
+        },
+        resolveServerIPs: async (name, dependencies) => {
+            resolvedNames.push(name);
+            // 診断対象の採用方針を、入れ子の NS 自己解決へ強制しない。
+            assert.equal(dependencies.gluePolicy, undefined);
+            if (name === 'a.root-servers.net') return ['192.0.2.1'];
+            assert.equal(name, 'a.gtld-servers.net');
+            return ['192.0.2.3'];
+        }
+    });
+    assert.equal(result.zoneApex, 'com');
+    assert.deepEqual(resolvedNames, ['a.root-servers.net', 'a.gtld-servers.net']);
+    assert.ok(!queriedServers.includes('192.0.2.99'));
+    const log = result.explorationLogs.find(entry => entry.status === 'FOLLOW_DELEGATION');
+    assert.deepEqual(log.glueIPs, ['192.0.2.2']);
+    assert.deepEqual(log.glueInfo.records.map(record => record.classification), [
+        'sibling domain', 'in-domain'
+    ]);
+    assert.match(log.rfc9471, /sibling glue.*採用せず/);
+});
+
+test('委任追跡のルート表記がドットでもsibling分類と不採用を維持する', async () => {
+    const result = await traceDomain('com', ['192.0.2.1'], new Map(), null, 1, [], {},
+        createTraceTestDependencies({
+            '192.0.2.1': referralResponse('com', 'a.gtld-servers.net', '192.0.2.99')
+        }), {}, '.');
+    assert.equal(result[0].glueInfo.records[0].classification, 'sibling domain');
+    assert.equal(result[1].status, 'LAME_DELEGATION_NO_NS_IP_ADDRESS');
+    assert.match(result[0].rfc9471, /sibling glue.*採用せず/);
+});
+
 test('ゾーン頂点探索は全親サーバーの ADDITIONAL と通信失敗を別々に保持する', async () => {
     const parentIPs = ['192.0.2.2', '192.0.2.3', '2001:db8::4', '192.0.2.5'];
     const rootResponse = referralResponse('com', 'ns.com', parentIPs[0]);
