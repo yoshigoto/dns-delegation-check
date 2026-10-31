@@ -71,6 +71,8 @@ nvm use
 
 リポジトリのルートで依存パッケージをインストールし、サーバーを起動します。
 
+DNS の名前解決ライブラリ `dns-self-resolver` は Git タグ `v1.2.2` に固定しています。
+
 ```bash
 npm ci
 npm start
