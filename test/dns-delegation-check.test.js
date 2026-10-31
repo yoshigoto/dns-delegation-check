@@ -1156,6 +1156,9 @@ test('共通APIのA/AAAA取得は並列で実行し重複・別名の回答を�
                 assert.equal(receivedCache, cache);
                 assert.equal(options.signal, controller.signal);
                 assert.equal(options.isAllowedServerIP, policy);
+                assert.equal(options.queryBudget, budget);
+                // このモックでは各呼び出しが1送信に対応する。
+                budget.remaining--;
                 calls.push(type);
                 if (type === 'NS') return {
                     flags: 1024,
@@ -1191,7 +1194,13 @@ test('共通APIのA/AAAA取得でも予算超過時は送信せず取得済み�
             queryBudget: budget,
             isAllowedServerIP: ip => ip === '192.0.2.20',
             resolveServerIPs: async () => assert.fail('取得済みのA回答を使う'),
-            queryDirectlyUDP: async (name, ip, cache, type) => {
+            queryDirectlyUDP: async (name, ip, cache, type, options) => {
+                assert.equal(options.queryBudget, budget);
+                if (budget.remaining === 0) {
+                    budget.exhausted = true;
+                    return { error: 'QUERY_LIMIT_EXCEEDED' };
+                }
+                budget.remaining--;
                 calls.push(type);
                 return type === 'NS'
                     ? { flags: 1024, answers: [{ name, type, data: 'ns1.child.example.com' }] }
@@ -1214,7 +1223,9 @@ test('共通APIへ渡す問い合わせ関数は途中で拒否されたA/AAAA�
             queryBudget: budget,
             isAllowedServerIP: () => allowed,
             resolveServerIPs: async () => null,
-            queryDirectlyUDP: async (name, ip, cache, type) => {
+            queryDirectlyUDP: async (name, ip, cache, type, options) => {
+                assert.equal(options.queryBudget, budget);
+                budget.remaining--;
                 calls.push(type);
                 allowed = false;
                 return { flags: 1024, answers: [{ name, type, data: 'ns1.child.example.com' }] };

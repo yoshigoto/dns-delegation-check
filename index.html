@@ -594,7 +594,7 @@ function translateDetail(detail, status = '') {
 
     const statusTranslations = {
         ZONE_APEX_LOOKUP_TIMEOUT: 'Zone apex discovery timed out. Check whether DNS servers are responding.',
-        QUERY_LIMIT_EXCEEDED: 'The DNS query limit was reached. The results may be incomplete.',
+        QUERY_LIMIT_EXCEEDED: 'The DNS transmission limit was reached. The results may be incomplete.',
         LAME_DELEGATION_MAX_DEPTH: 'The maximum delegation depth was reached; further tracing was stopped.',
         LAME_DELEGATION_TIMEOUT: 'The server did not respond.',
         LAME_DELEGATION_NO_ZONE: 'The server did not provide an authoritative response for the zone.',
@@ -756,7 +756,7 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
     const verdict = document.createElement('div');
     const verdictText = isEnglish
         ? queryLimitExceeded
-            ? '⚠️ Review needed: The DNS query limit was reached; results are incomplete.'
+            ? '⚠️ Review needed: The DNS transmission limit was reached; results are incomplete.'
             : !isApexDetermined
                 ? (cnameFound
                     ? '⚠️ Not checked: The input is a CNAME. Enter a zone name.'
@@ -781,7 +781,7 @@ function buildSummary(logData, parentDelegationUnavailable = false, delegationLo
                                 ? '⚠️ Review needed: A network error prevented delegation checks.'
                                 : '✅ Healthy: Delegation is configured correctly.')
         : queryLimitExceeded
-        ? '⚠️  要確認: DNS 問い合わせ数が上限に達したため、検査結果は不完全です'
+        ? '⚠️  要確認: DNS メッセージ送信数が上限に達したため、検査結果は不完全です'
         : !isApexDetermined
         ? (cnameFound
             ? '⚠️  検査対象外: 入力名は CNAME (別名) なので、ゾーン名を指定してください'

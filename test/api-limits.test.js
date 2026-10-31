@@ -19,12 +19,13 @@ function createDnsFixture(phase = 'query') {
     let holding = true;
     let resolutionCount = 0;
 
-    function hold(signal, value) {
+    function hold(signal, value, queryBudget) {
         if (!holding) return Promise.resolve(value);
         const result = deferred();
         const aborted = deferred();
         const entry = {
             signal,
+            queryBudget,
             aborted: aborted.promise,
             finish() {
                 signal.removeEventListener('abort', onAbort);
@@ -72,17 +73,17 @@ function createDnsFixture(phase = 'query') {
                 if (signal.aborted) return [];
                 return phase === 'resolver' ? hold(signal, ['8.8.8.8']) : ['8.8.8.8'];
             },
-            queryDirectlyUDP: async (name, ip, cache, type, { signal }) => {
+            queryDirectlyUDP: async (name, ip, cache, type, { signal, queryBudget }) => {
                 if (signal.aborted) return { error: 'ABORTED' };
                 if (ip === '8.8.8.8' && name === 'com' && type === 'NS') {
                     const response = referral('com', 'ns.com', '1.1.1.1');
-                    return phase === 'query' ? hold(signal, response) : response;
+                    return phase === 'query' ? hold(signal, response, queryBudget) : response;
                 }
                 if (ip === '1.1.1.1' && name === 'example.com' && type === 'NS') {
                     const count = (parentQueries.get(cache) || 0) + 1;
                     parentQueries.set(cache, count);
                     const response = referral('example.com', 'ns.example.com', '9.9.9.9');
-                    return phase === 'trace' && count === 2 ? hold(signal, response) : response;
+                    return phase === 'trace' && count === 2 ? hold(signal, response, queryBudget) : response;
                 }
                 if (ip === '9.9.9.9') {
                     if (name === 'example.com' && type === 'NS') {
@@ -176,6 +177,19 @@ async function finish(call) {
     assert.equal(response.body.success, true);
     assert.equal(call.entry.signal.aborted, false, 'Normal completion must not abort DNS');
 }
+
+test('APIは検査ごとに1000送信の独立した予算を渡し、送信しないモック呼び出しは減算しない', async t => {
+    const harness = await createHarness(t, 'query');
+    const first = await harness.startHeld('198.51.100.41');
+    const second = await harness.startHeld('198.51.100.42');
+    assert.equal(first.entry.queryBudget.remaining, 1000);
+    assert.equal(second.entry.queryBudget.remaining, 1000);
+    assert.notEqual(first.entry.queryBudget, second.entry.queryBudget);
+    harness.fixture.completeAll();
+    await Promise.all([finish(first), finish(second)]);
+    assert.equal(first.entry.queryBudget.remaining, 1000);
+    assert.equal(second.entry.queryBudget.remaining, 1000);
+});
 
 test('API はクライアント別に毎分10件まで許可し、60秒の境界で再び受け付ける', { timeout: 10000 }, async t => {
     const { fixture, start } = await createHarness(t);
