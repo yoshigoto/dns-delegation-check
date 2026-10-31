@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { isPublicDnsServerAddress } from 'dns-self-resolver';
 
 import {
     app,
@@ -11,6 +12,7 @@ import {
 const isTestNetAllowed = ip => ip.startsWith('192.0.2.');
 
 test('isPublicServerIP はグローバルユニキャストアドレスのみ許可する', () => {
+    assert.equal(isPublicServerIP, isPublicDnsServerAddress);
     for (const ip of ['198.41.0.4', '8.8.8.8', '2001:503:ba3e::2:30', '2a00:1450:4001::1']) {
         assert.equal(isPublicServerIP(ip), true, ip);
     }
@@ -19,7 +21,8 @@ test('isPublicServerIP はグローバルユニキャストアドレスのみ許
         '172.16.0.1', '172.31.255.255', '192.0.0.8', '192.0.2.1', '192.168.1.1', '198.18.0.1',
         '198.51.100.1', '203.0.113.1', '224.0.0.1', '255.255.255.255',
         '::', '::1', '::ffff:127.0.0.1', '::ffff:10.0.0.1', '64:ff9b::7f00:1', 'fc00::1', 'fd12::1',
-        'fe80::1', 'fe80::1%eth0', 'ff02::1', '2001:db8::1', '2001::1', '2002:7f00:1::1', '3fff::1'
+        'fe80::1', 'fe80::1%eth0', 'ff02::1', '2001:db8::1', '2001::1', '2002:7f00:1::1', '3fff::1',
+        '2001:2::1', '2001:10::1', '2001:20::1', '4000::1', '2001:500:2::c%eth0'
     ]) {
         assert.equal(isPublicServerIP(ip), false, ip);
     }
@@ -161,6 +164,79 @@ test('ゾーン頂点探索は非グローバルな NS アドレスしか無い�
         'LAME_DELEGATION_NON_PUBLIC_ADDRESS'
     ]);
     assert.match(result.explorationLogs[0].addressSelectionNotes[0], /169\.254\.169\.254/);
+});
+
+test('名前解決で得た非グローバルアドレスもゾーン頂点探索で診断する', async () => {
+    const queriedServers = [];
+    const result = await getZoneApex('evil.example', new Map(), {
+        isAllowedServerIP: isTestNetAllowed,
+        resolveServerIPs: async (name, dependencies) => {
+            if (name === 'a.root-servers.net') return ['192.0.2.1'];
+
+            assert.equal(dependencies.isAllowedServerIP('127.0.0.1'), true);
+            assert.equal(
+                (await dependencies.queryDirectlyUDP('nested.example', '127.0.0.1', new Map(), 'A')).error,
+                'BLOCKED_ADDRESS'
+            );
+            return ['127.0.0.1'];
+        },
+        queryDirectlyUDP: async (qname, serverIp) => {
+            queriedServers.push(serverIp);
+            if (qname === 'example') {
+                return {
+                    flags: 0,
+                    answers: [],
+                    authorities: [{ type: 'NS', name: 'example', data: 'ns.example' }]
+                };
+            }
+            assert.fail(`想定外の問い合わせ: ${qname} (${serverIp})`);
+        }
+    });
+
+    assert.deepEqual(queriedServers, ['192.0.2.1']);
+    assert.equal(result.hasZoneApexLookupFailure, true);
+    assert.deepEqual(result.explorationLogs.map(log => log.status), [
+        'FOLLOW_DELEGATION',
+        'LAME_DELEGATION_NON_PUBLIC_ADDRESS'
+    ]);
+    assert.match(result.explorationLogs[1].detail, /127\.0\.0\.1/);
+});
+
+test('名前解決で得た混在アドレスは非グローバルアドレスも診断し許可先だけ問い合わせる', async () => {
+    const queriedServers = [];
+    const result = await traceDomain(
+        'child.example.com',
+        ['192.0.2.10'],
+        new Map(),
+        null,
+        1,
+        [],
+        {},
+        {
+            isAllowedServerIP: isTestNetAllowed,
+            resolveServerIPs: async (name, dependencies) => {
+                assert.equal(dependencies.isAllowedServerIP('127.0.0.1'), true);
+                return ['127.0.0.1', '192.0.2.20'];
+            },
+            queryDirectlyUDP: async (domain, serverIp) => {
+                queriedServers.push(serverIp);
+                if (serverIp === '192.0.2.10') {
+                    return {
+                        flags: 0,
+                        answers: [],
+                        authorities: [{ type: 'NS', name: 'child.example.com', data: 'ns1.child.example.com' }]
+                    };
+                }
+                assert.equal(serverIp, '192.0.2.20');
+                return { error: 'TIMEOUT' };
+            }
+        }
+    );
+
+    assert.deepEqual(queriedServers, ['192.0.2.10', '192.0.2.20']);
+    assert.ok(result.some(log =>
+        log.status === 'LAME_DELEGATION_NON_PUBLIC_ADDRESS' && log.server === '127.0.0.1'
+    ));
 });
 
 async function withServer(callback) {

@@ -1,12 +1,12 @@
 import express from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
-import net from 'net';
 import path from 'path';
 import dnsPacket from 'dns-packet';	// https://github.com/mafintosh/dns-packet
 import { fileURLToPath } from 'url';
 import {
     isIPv6,
+    isPublicDnsServerAddress as isPublicServerIP,
     normalizeDnsName,
     isSubdomainOrEqual,
     hasParentChildRelationship,
@@ -25,42 +25,7 @@ const MAX_CONCURRENT_TRACES = 8;
 const MAX_CONCURRENT_TRACES_PER_CLIENT = 2;
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS_PER_CLIENT = 10;
-
-// IANA IPv4/IPv6 Special-Purpose Address Registry のうち、インターネット上の権威サーバーとして
-// 到達すべきでない範囲。内部ネットワークへの問い合わせ (SSRF) を防ぐ。
-const NON_PUBLIC_IPV4 = new net.BlockList();
-[
-    ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
-    ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
-    ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],
-    ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]
-].forEach(([address, prefix]) => NON_PUBLIC_IPV4.addSubnet(address, prefix, 'ipv4'));
-const GLOBAL_UNICAST_IPV6 = new net.BlockList();
-GLOBAL_UNICAST_IPV6.addSubnet('2000::', 3, 'ipv6');
-const NON_PUBLIC_IPV6 = new net.BlockList();
-[
-    ['2001::', 32], ['2001:2::', 48], ['2001:10::', 28], ['2001:20::', 28],
-    ['2001:db8::', 32], ['2002::', 16], ['3fff::', 20]
-].forEach(([address, prefix]) => NON_PUBLIC_IPV6.addSubnet(address, prefix, 'ipv6'));
-
-function isPublicServerIP(ip) {
-    const address = String(ip || '');
-    try {
-        switch (net.isIP(address)) {
-            case 4:
-                return !NON_PUBLIC_IPV4.check(address, 'ipv4');
-            case 6:
-                // IPv4-mapped (::ffff:0:0/96)、NAT64、ULA、リンクローカル等は 2000::/3 外のため拒否される。
-                return !address.includes('%') &&
-                    GLOBAL_UNICAST_IPV6.check(address, 'ipv6') &&
-                    !NON_PUBLIC_IPV6.check(address, 'ipv6');
-            default:
-                return false;
-        }
-    } catch {
-        return false;
-    }
-}
+const allowResolvedServerIP = () => true;
 
 const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const inlineScriptHashes = [...indexHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)]
@@ -305,9 +270,12 @@ function createQueryFunction(dependencies) {
             }
             budget.remaining--;
         }
-        return dependencies.signal
-            ? query(name, serverIp, cache, qType, { ...(options || {}), signal: dependencies.signal })
-            : query(name, serverIp, cache, qType, options);
+        const queryOptions = typeof options === 'boolean' ? { useEdns: options } : { ...(options || {}) };
+        return query(name, serverIp, cache, qType, {
+            ...queryOptions,
+            isAllowedServerIP,
+            ...(dependencies.signal ? { signal: dependencies.signal } : {})
+        });
     };
 }
 
@@ -316,7 +284,11 @@ function isQueryBudgetExhausted(dependencies) {
 }
 
 function createResolverDependencies(dependencies, dnsResponseCache, queryUDP) {
-    return { ...dependencies, dnsResponseCache, queryDirectlyUDP: queryUDP };
+    return {
+        ...dependencies, dnsResponseCache, queryDirectlyUDP: queryUDP,
+        // Keep resolved addresses available for diagnostics; queryUDP still enforces the destination policy.
+        isAllowedServerIP: allowResolvedServerIP
+    };
 }
 
 // 宛先として許可されない NS アドレスを除外し、1 referral あたりの追跡数を制限する。
