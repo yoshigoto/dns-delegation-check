@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
 import test from 'node:test';
-import { isPublicDnsServerAddress, resolveServerIPs, ROOT_SERVER_BOOTSTRAP_IP } from 'dns-self-resolver';
+import {
+    isPublicDnsServerAddress, resolveServerIPs, ROOT_SERVER_BOOTSTRAP_IP, ROOT_SERVER_IPS, setDefaultRootServers
+} from 'dns-self-resolver';
 
 import {
     app,
@@ -11,6 +13,9 @@ import {
 } from '../dns-delegation-check.js';
 
 const isTestNetAllowed = ip => ip.startsWith('192.0.2.');
+
+// モックが a.root-servers.net から順に試す前提のため、ルートサーバーの無作為選択を固定する
+setDefaultRootServers(ROOT_SERVER_IPS);
 
 test('isPublicServerIP はグローバルユニキャストアドレスのみ許可する', () => {
     assert.equal(isPublicServerIP, isPublicDnsServerAddress);
@@ -363,4 +368,17 @@ test('API は不正な入力に対して内部情報を含まない JSON エラ�
             assert.equal(response.status, 400, JSON.stringify(domain));
         }
     });
+});
+
+test('実通信の場合だけ NS アドレスキャッシュの共有範囲を指定する', async () => {
+    const scopes = [];
+    const resolveServerIPs = async (name, dependencies) => {
+        scopes.push(dependencies.cacheScope);
+        return null;
+    };
+
+    await getZoneApex('example.test', new Map(), { resolveServerIPs });
+    await getZoneApex('example.test', new Map(), { resolveServerIPs, queryDirectlyUDP: async () => ({ answers: [] }) });
+
+    assert.deepEqual(scopes, ['dns-delegation-check', undefined]);
 });

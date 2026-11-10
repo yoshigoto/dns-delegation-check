@@ -217,6 +217,10 @@ function getMinimizedQnames(domain) {
     return labels.map((_, index) => labels.slice(index).join('.')).reverse();
 }
 
+function usesDefaultTransport(dependencies) {
+    return !dependencies.queryDirectlyUDP || dependencies.queryDirectlyUDP === queryDirectlyUDP;
+}
+
 function getServerAddressPolicy(dependencies) {
     if (typeof dependencies.isAllowedServerIP === 'function') return dependencies.isAllowedServerIP;
     // 宛先制限は実ネットワークへ送信する既定トランスポートに適用する (テスト用モック等は対象外)。
@@ -228,15 +232,15 @@ function createQueryFunction(dependencies) {
     const isAllowedServerIP = getServerAddressPolicy(dependencies);
     const budget = dependencies.queryBudget;
     return (name, serverIp, cache, qType, options) => {
+        // dns-self-resolver も同じ判定を行うが、差し替えられた問い合わせ関数にも送信させないためにここで拒否する。
         if (!isAllowedServerIP(serverIp)) {
             return Promise.resolve({
                 error: 'BLOCKED_ADDRESS', domain: name, serverIp, qType, retryable: false,
                 detail: `${serverIp} はグローバルユニキャストアドレスではないため、問い合わせを行いません。`
             });
         }
-        const queryOptions = typeof options === 'boolean' ? { useEdns: options } : { ...(options || {}) };
         return Promise.resolve(query(name, serverIp, cache, qType, {
-            ...queryOptions,
+            ...options,
             isAllowedServerIP,
             ...(budget ? { queryBudget: budget } : {}),
             ...(dependencies.signal ? { signal: dependencies.signal } : {})
@@ -255,7 +259,9 @@ function createResolverDependencies(dependencies, dnsResponseCache, queryUDP) {
     return {
         ...dependencies, dnsResponseCache, queryDirectlyUDP: queryUDP,
         isAllowedServerIP: getServerAddressPolicy(dependencies),
-        includeBlockedAddresses: true
+        includeBlockedAddresses: true,
+        // queryUDP は呼び出しごとに作るラッパーのため、実通信の場合は NS アドレスキャッシュの共有範囲を明示する。
+        ...(usesDefaultTransport(dependencies) ? { cacheScope: 'dns-delegation-check' } : {})
     };
 }
 
