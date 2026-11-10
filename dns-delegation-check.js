@@ -240,7 +240,8 @@ function createQueryFunction(dependencies) {
             });
         }
         return Promise.resolve(query(name, serverIp, cache, qType, {
-            ...options,
+            // queryDirectlyUDP と同じく boolean (useEdns) も受け付ける。オプションを追加するため、ここでオブジェクトに直す。
+            ...(typeof options === 'boolean' ? { useEdns: options } : options),
             isAllowedServerIP,
             ...(budget ? { queryBudget: budget } : {}),
             ...(dependencies.signal ? { signal: dependencies.signal } : {})
