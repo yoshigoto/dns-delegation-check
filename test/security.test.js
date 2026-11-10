@@ -382,3 +382,21 @@ test('実通信の場合だけ NS アドレスキャッシュの共有範囲を�
 
     assert.deepEqual(scopes, ['dns-delegation-check', undefined]);
 });
+
+test('共通APIへ渡す問い合わせ関数は boolean の useEdns 指定を維持する', async () => {
+    const received = [];
+    await getZoneApex('example.test', new Map(), {
+        resolveServerIPs: async (name, dependencies) => {
+            for (const options of [false, true, undefined]) {
+                await dependencies.queryDirectlyUDP('nested.example', '192.0.2.1', new Map(), 'A', options);
+            }
+            return null;
+        },
+        queryDirectlyUDP: async (name, ip, cache, type, options) => {
+            received.push(options.useEdns);
+            return { answers: [] };
+        }
+    });
+
+    assert.deepEqual(received, [false, true, undefined]);
+});
