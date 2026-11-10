@@ -627,11 +627,9 @@ async function traceDomain(domain, servers, dnsResponseCache, parentIP = null, c
 
         if (res.error === 'TIMEOUT') {
             logEntry.status = 'LAME_DELEGATION_TIMEOUT';
-            if (res.isCached) {
-                logEntry.detail = `サーバーから応答がありません。(キャッシュ再利用)`;
-            } else {
-                logEntry.detail = `サーバーから応答がありません。`;
-            }
+            // dns-self-resolver は応答がなければ再送するため、何回送って無応答だったかを示す。
+            const attemptNote = res.udpAttempts > 1 ? `(${res.udpAttempts} 回送信)` : '';
+            logEntry.detail = `サーバーから応答がありません。${attemptNote}${res.isCached ? '(キャッシュ再利用)' : ''}`;
             results.push(logEntry);
             return results;
         }

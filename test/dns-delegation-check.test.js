@@ -1313,3 +1313,19 @@ test('委任先の IP アドレス不在と Glue の IP アドレス不一致を
     assert.equal(glueMismatch[1].status, 'LAME_DELEGATION_NOT_MATCH');
     assert.equal(glueMismatch[1].glueMatch.success, false);
 });
+test('タイムアウトの診断に再送を含む送信回数を示す', async () => {
+    const trace = response => traceDomain('child.example.com', ['192.0.2.20'], new Map(), null, 1, [], {}, {
+        resolveServerIPs: async () => null,
+        queryDirectlyUDP: async () => response
+    });
+
+    const retried = await trace({ error: 'TIMEOUT', udpAttempts: 3 });
+    assert.equal(retried[0].status, 'LAME_DELEGATION_TIMEOUT');
+    assert.equal(retried[0].detail, 'サーバーから応答がありません。(3 回送信)');
+
+    const cached = await trace({ error: 'TIMEOUT', udpAttempts: 3, isCached: true });
+    assert.equal(cached[0].detail, 'サーバーから応答がありません。(3 回送信)(キャッシュ再利用)');
+
+    const single = await trace({ error: 'TIMEOUT' });
+    assert.equal(single[0].detail, 'サーバーから応答がありません。');
+});
