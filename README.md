@@ -49,7 +49,7 @@ https://www.on-link.jp/dns-delegation-check/?domain=example.com
 | `LAME_DELEGATION_NO_IP_ADDRESS` | 委任先 NS の IP アドレスを解決できない |
 | `LAME_DELEGATION_NO_NS_IP_ADDRESS` | ゾーン頂点探索中に委任先 NS の IP アドレスを取得できず、探索を続けられない |
 | `LAME_DELEGATION_NON_PUBLIC_ADDRESS` | 委任先にグローバルユニキャストではないアドレスが含まれているため、問い合わせを行わない |
-| `LAME_DELEGATION_TIMEOUT` | DNS サーバーから応答がない |
+| `LAME_DELEGATION_TIMEOUT` | DNS サーバーから応答がない（UDP は再送を含め 3 回送信しても無応答） |
 | `LAME_DELEGATION_MAX_DEPTH` | 委任チェーンが追跡上限に達した |
 | `NETWORK_ERROR` | DNS 通信または応答の処理中にエラーが発生した |
 | `QUERY_LIMIT_EXCEEDED` | 1 回の検査で送信できる DNS メッセージ数の上限に達した |
@@ -73,7 +73,7 @@ nvm use
 
 リポジトリのルートで依存パッケージをインストールし、サーバーを起動します。
 
-DNS の名前解決ライブラリ `dns-self-resolver` は、ルートヒントの更新・ルートサーバーの無作為選択・NS アドレスキャッシュの修正・`cacheScope` を含む Git タグ `v1.7.0` に固定しています。実通信では `cacheScope` を指定し、検査をまたいで NS アドレスキャッシュを共有します。送信予算、referral 分類と `in-domain-only` 方針、および非公開アドレスのみの最終回答を TTL 内は再問い合わせせず診断に利用する動作も維持しています。
+DNS の名前解決ライブラリ `dns-self-resolver` は、ルートヒントの更新・ルートサーバーの無作為選択・NS アドレスキャッシュの修正・`cacheScope` を含む UDP 再送を追加した v1.8.0 相当のコミットに固定しています。実通信では `cacheScope` を指定し、検査をまたいで NS アドレスキャッシュを共有します。送信予算、referral 分類と `in-domain-only` 方針、および非公開アドレスのみの最終回答を TTL 内は再問い合わせせず診断に利用する動作も維持しています。
 
 `getZoneApex` 本体はアプリに残し、referral の名前関係の判定と NS ごとのアドレス候補の生成だけ共通 API を利用します。ゾーン探索は問い合わせ名に一致する委任 NS（`queryNamePolicy: 'exact'`）、診断追跡は親子関係のある NS（`related`）を採用し、どちらも `requireBelowServerZone: false` で既存の診断範囲を維持します。`in-domain-only`、A/AAAA の複数候補、glue のない NS の個別自己解決、宛先拒否・循環の診断は変更していません。ルート・入れ子の NS 自己解決は引き続きライブラリ既定の厳密な referral 判定を使います。
 
@@ -179,7 +179,7 @@ Content-Type: application/json
 ## 注意事項
 
 - DNS 問い合わせは利用者の端末ではなく、アプリケーションサーバーから実行されます。
-- ゾーン頂点探索は 30 秒、個々の DNS 通信は 5 秒でタイムアウトします。ブラウザーから接続が切断された場合も、サーバーは進行中の DNS 問い合わせを中断します。HTTP サーバーのタイムアウトは 120 秒です。
+- ゾーン頂点探索は 30 秒、個々の DNS 通信は 5 秒でタイムアウトします。UDP は応答がなければ 1 秒後と 3 秒後に再送し、一時的なパケットロスを無応答と誤判定しにくくしています。ブラウザーから接続が切断された場合も、サーバーは進行中の DNS 問い合わせを中断します。HTTP サーバーのタイムアウトは 120 秒です。
 - DNS サーバーの応答やネットワーク環境によっては、設定に問題がなくても通信エラーやタイムアウトが発生することがあります。
 - 診断対象 referral の採用方針と、glue のない NS 名を自己解決する方針は別です。後者は従来どおりライブラリ既定の `strict`（ルート referral の TLD NS アドレスを利用）を維持しています。
 - 調査対象への問い合わせが、ネットワークおよび運用上許可されていることを確認して利用してください。

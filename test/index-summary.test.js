@@ -157,6 +157,15 @@ test('英語表示は切替 URL にドメインを引き継ぎ、概要と詳細
         vm.runInNewContext("translateDetail('委任は正常です。', 'SUCCESS')", context),
         'The delegation is correct.'
     );
+    for (const [detail, expected] of [
+        ['サーバーから応答がありません。', 'The server did not respond.'],
+        ['サーバーから応答がありません。(3 回送信)', 'The server did not respond. (3 attempts)'],
+        ['サーバーから応答がありません。(キャッシュ再利用)', 'The server did not respond. (cached)'],
+        ['サーバーから応答がありません。(3 回送信)(キャッシュ再利用)', 'The server did not respond. (3 attempts) (cached)']
+    ]) {
+        assert.equal(context.translateDetail(detail, 'LAME_DELEGATION_TIMEOUT'), expected);
+        assert.equal(japaneseContext.translateDetail(detail, 'LAME_DELEGATION_TIMEOUT'), detail);
+    }
 
     context.buildSummary([
         { status: 'ZONE_APEX_FOUND', detail: 'ゾーン頂点を確定: example.com。' },

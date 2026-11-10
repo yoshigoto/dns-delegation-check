@@ -591,12 +591,18 @@ function translateDetail(detail, status = '') {
         if (match) return `${match[3]} referred ${match[1]} to ${match[2]}.`;
     }
     if (detail.startsWith('エラー: ')) return `Error: ${detail.slice('エラー: '.length)}`;
+    if (status === 'LAME_DELEGATION_TIMEOUT') {
+        // 日本語の詳細に付く送信回数とキャッシュ再利用の注記を英語でも残す
+        const attempts = detail.match(/\((\d+) 回送信\)/);
+        return 'The server did not respond.' +
+            (attempts ? ` (${attempts[1]} attempts)` : '') +
+            (detail.includes('(キャッシュ再利用)') ? ' (cached)' : '');
+    }
 
     const statusTranslations = {
         ZONE_APEX_LOOKUP_TIMEOUT: 'Zone apex discovery timed out. Check whether DNS servers are responding.',
         QUERY_LIMIT_EXCEEDED: 'The DNS transmission limit was reached. The results may be incomplete.',
         LAME_DELEGATION_MAX_DEPTH: 'The maximum delegation depth was reached; further tracing was stopped.',
-        LAME_DELEGATION_TIMEOUT: 'The server did not respond.',
         LAME_DELEGATION_NO_ZONE: 'The server did not provide an authoritative response for the zone.',
         LAME_DELEGATION_NO_AUTHORITY_NS: 'The authoritative server has no NS records in the AUTHORITY section.',
         LAME_DELEGATION_NO_NS_IP_ADDRESS: 'Could not resolve an IP address for the delegated name server; tracing cannot continue.',
