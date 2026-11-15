@@ -137,9 +137,9 @@ function normalizeUserDomain(value) {
     const candidate = raw.replace(/^https?:\/\//i, '').replace(/\/$/, '');
     const normalized = normalizeDnsName(candidate);
 
-    if (!normalized) return '';
+    if (!normalized || normalized === 'localhost') return '';
     if (normalized.length > 253) return '';
-    if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(normalized)) {
+    if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(normalized)) {
         return '';
     }
 

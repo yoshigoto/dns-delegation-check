@@ -21,6 +21,7 @@ https://www.on-link.jp/dns-delegation-check/?domain=example.com
 ## 機能
 
 - ルートからゾーン頂点を探索し、親から子へ委任チェーンを追跡
+- TLD 名を入力した場合は、ルートゾーンからの委任状態を確認
 - 親が委任する NS 情報と、子の権威サーバーが返す NS 情報を照合
 - 親の Glue と、NS ホスト名から解決した IP アドレスを比較
 - Glue 比較の A/AAAA 取得は `dns-self-resolver` の `resolveRecordFromServer` を使い、重複を除去します。宛先制限・問い合わせ予算・キャンセル付きの問い合わせ関数を渡し、指定サーバーから取得できない場合の NS 自己解決も維持します。
