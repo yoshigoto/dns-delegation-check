@@ -73,10 +73,45 @@ test('共通referral候補でも委任診断はNS順のA/AAAAとglueless自己�
 test('ドメイン入力を正規化し、不正な値を拒否する', () => {
     assert.equal(normalizeUserDomain(' HTTPS://Example.COM/ '), 'example.com');
     assert.equal(normalizeUserDomain('a.example.com.'), 'a.example.com');
+    assert.equal(normalizeUserDomain(' COM. '), 'com');
     assert.equal(normalizeUserDomain('example.com/path'), '');
     assert.equal(normalizeUserDomain('localhost'), '');
     assert.equal(normalizeUserDomain('bad_domain.example'), '');
     assert.equal(normalizeUserDomain(''), '');
+});
+
+test('TLD のゾーン頂点をルートからの委任で特定する', async () => {
+    const rootIP = '192.0.2.1';
+    const tldServerIP = '192.0.2.2';
+    const queries = [];
+    const resolvedNames = [];
+    const result = await getZoneApex('com', new Map(), {
+        resolveServerIPs: async name => {
+            resolvedNames.push(name);
+            return name === 'a.root-servers.net' ? [rootIP] : [tldServerIP];
+        },
+        queryDirectlyUDP: async (name, serverIp) => {
+            queries.push([name, serverIp]);
+            if (serverIp === rootIP) {
+                return referralResponse('com', 'a.gtld-servers.net', tldServerIP);
+            }
+            return {
+                flags: 1024,
+                answers: [{ type: 'NS', name: 'com', data: 'a.gtld-servers.net' }],
+                authorities: []
+            };
+        }
+    });
+
+    assert.equal(result.zoneApex, 'com');
+    assert.equal(result.parentZone, '');
+    assert.deepEqual(result.parentServerIPs, [rootIP]);
+    assert.deepEqual(result.explorationLogs.map(log => log.status), [
+        'FOLLOW_DELEGATION',
+        'ZONE_APEX_FOUND'
+    ]);
+    assert.deepEqual(queries, [['com', rootIP], ['com', tldServerIP]]);
+    assert.deepEqual(resolvedNames, ['a.root-servers.net', 'a.gtld-servers.net']);
 });
 
 test('最小化した問い合わせ名をルートから順に作る', () => {
@@ -419,7 +454,7 @@ test('委任のない権威応答でゾーン頂点探索を終了する', async
     ]);
 });
 
-test('ゾーン頂点探索は sibling glue を採用せず TLD 委任を辿れない', async () => {
+test('ゾーン頂点探索は sibling glue を採用せず、名前解決できない TLD 委任を辿らない', async () => {
     const dependencies = createZoneApexTestDependencies([
         {
             qname: 'com', serverIp: '192.0.2.1', qType: 'NS', value: {

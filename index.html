@@ -409,7 +409,7 @@
     <div id="summary-panel" class="summary-panel"></div>
     <div id="result-container" class="result-container">
         <div id="initial-prompt" style="color: #666; text-align: center; padding-top: 40px;">ドメイン名を入力して解析をスタートしてください。</div>
-        <div id="initial-note" style="color: #666; text-align: center; padding-top: 40px;">※委任チェッカーという性格上、ルートや TLD には対応していません。</div>
+        <div id="initial-note" style="color: #666; text-align: center; padding-top: 40px;">※ルートゾーン自体は親ゾーンがないため対象外ですが、TLD の委任状態は確認できます。</div>
     </div>
 </div>
 
@@ -451,7 +451,7 @@ if (isEnglish) {
         'domain-label': 'Domain name to check',
         'start-btn': 'Start check',
         'initial-prompt': 'Enter a domain name and start the check.',
-        'initial-note': 'Note: Root and TLD zones are not supported.',
+        'initial-note': 'Note: The root zone itself has no parent, but TLD delegations can be checked.',
         'footer-note': 'This tool is provided for testing and evaluation purposes.'
     };
     Object.entries(englishLabels).forEach(([id, value]) => {
@@ -490,15 +490,15 @@ function normalizeUserDomain(value) {
     try {
         const urlObj = new URL(raw.includes('://') ? raw : `https://${raw}`);
         const hostname = urlObj.hostname.replace(/\.$/, '').toLowerCase();
-        if (!hostname || hostname.length > 253) return '';
-        if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(hostname)) {
+        if (!hostname || hostname === 'localhost' || hostname.length > 253) return '';
+        if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(hostname)) {
             return '';
         }
         return hostname;
     } catch (e) {
         const hostname = raw.replace(/^https?:\/\//i, '').replace(/\/$/, '').replace(/\.$/, '').toLowerCase();
-        if (!hostname || hostname.length > 253) return '';
-        if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(hostname)) {
+        if (!hostname || hostname === 'localhost' || hostname.length > 253) return '';
+        if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(hostname)) {
             return '';
         }
         return hostname;

@@ -97,11 +97,18 @@ function loadPageWithSearch(search = '', fetchImpl, savedDomain = '') {
         resultContainer,
         localStorageValues,
         startTrace: context.startTrace,
+        normalizeUserDomain: context.normalizeUserDomain,
         renderLogTree: context.renderLogTree,
         renderGlueInfo: context.renderGlueInfo,
         buildDualLogView: context.buildDualLogView
     };
 }
+
+test('入力検証は TLD 名を受け付けるが localhost を拒否する', () => {
+    const { normalizeUserDomain } = loadPageWithSearch();
+    assert.equal(normalizeUserDomain(' COM. '), 'com');
+    assert.equal(normalizeUserDomain('localhost'), '');
+});
 
 function renderVerdict(logData, parentDelegationUnavailable = false, delegationLogData = logData) {
     const { buildSummary, summaryPanel } = loadBuildSummary();
